@@ -6,6 +6,7 @@
 	     (ice-9 rdelim)
 	     (ice-9 popen)
 	     (ice-9 getopt-long)
+	     (web uri)
 	     (srfi srfi-1))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -50,7 +51,7 @@
       (else b))))
 
 (define (string-first-line str)
-  (car (string-split str #\newline)))
+  (string-trim-both (car (string-split str #\newline))))
 
 (define (read-sys-out cmd)
   (with-error-to-port (%make-void-port "w")
@@ -77,24 +78,40 @@
 ;; other utilities
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define config-dir
+  (getenv* "XDG_CONFIG_HOME" (string-append (getenv "HOME") "/.config/")))
+
+(define cache-dir
+  (getenv* "XDG_CACHE_HOME" (string-append (getenv "HOME") "/.cache/")))
+
 (define assoc-file-path
-  (string-append (getenv* "XDG_CONFIG_HOME"
-			  (string-append (getenv "HOME") "/.config/"))
-		 "associations"))
+  (string-append config-dir "associations"))
 
 (define log-file-path
-  (string-append (getenv* "XDG_CACHE_HOME"
-			  (string-append (getenv "HOME") "/.cache/"))
-		 "o.log"))
+  (string-append cache-dir "jaro.log"))
 
 (define (mime-type f)
+  (define (mime-by ls)
+    (let ((mime (read-sys-out ls)))
+      (if mime
+	  (string-first-line mime)
+	  #f)))
+  (define (mime-by-mimetype f)
+    (mime-by `("mimetype" "--brief" "--dereference" ,f)))
+  (define (mime-by-file f)
+    (mime-by `("file" "--brief" "--dereference" "--mime-type" ,f)))
+  (define (mime-by-uri-scheme f)
+    (let ((uri (string->uri f)))
+      (if uri
+	  (string-append "x-scheme-handler/" (symbol->string (uri-scheme uri)))
+	  #f)))
   (cond
-   ((not (file-exists? f)) #f)
-   (else
-    (let ((pmime (read-sys-out `("mimetype" "--brief" "--dereference" ,f))))
-      (if pmime
-	  (string-first-line pmime)
-	  (string-first-line (read-sys-out `("file" "--brief" "--dereference" "--mime-type" ,f))))))))
+   ((not (file-exists? f)) (mime-by-uri-scheme f))
+   (else (let ((mime (mime-by-mimetype f)))
+	   (cond
+	    ((and mime (string-null? mime)) (mime-by-uri-scheme f))
+	    (mime mime)
+	    (else (mime-by-file f)))))))
 
 (define (append-log text)
   (let ((log-file (open-file log-file-path "a")))
@@ -121,9 +138,8 @@
   (define (helper cmd file escape?)
     (define (escape f)
       (if escape?
-        (string-append "'" f "'")
+        (string-append "'" (substring-replace f "'" "\\'") "'")
 	f))
-
     (cond
      ((list? cmd) (map (λ (cmd) (helper cmd file escape?)) cmd))
      ((string? cmd) (let ((str cmd))
@@ -135,12 +151,30 @@
 		      str))))
   (helper cmd file (string? cmd)))
 
-(define (run-assoc-list file ls)
-  (cond
-   ((null? ls) #f)
-   (((car ls) file) #t)
-   (else
-    (run-assoc-list file (cdr ls)))))
+; TODO:
+(define (open-with-desktop-file desktop-file file)
+  (display (string-append "df:" desktop-file ":f:" file)))
+
+(define (select-alternative-with cmd)
+  (λ (file file-mime)
+    (let ((mime-cache (open-file "/usr/share/applications/mimeinfo.cache" "r")))
+      (define (helper mime-cache)
+	(define line (read-line mime-cache))
+	(cond
+	 ((eof-object? line) #f)
+	 ((string-contains line "=")
+	    (let* ((line-data (string-split line #\=))
+		   (line-mime (car line-data))
+		   (line-apps (cadr line-data)))
+	      (if (equal? file-mime line-mime)
+		  (let* ((alternatives (string-join (string-split line-apps #\;) "\n"))
+			 (port (open-input-pipe (string-append "printf '" alternatives "' | " cmd)))
+			 (result (read-line port)))
+		    (close-port port)
+		    (open-with-desktop-file result file))
+		  (helper mime-cache))))
+	 (else (helper mime-cache))))
+	(helper mime-cache))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; main functionality
@@ -161,8 +195,8 @@
 (define* (run-fn-or-system x file #:optional on-success on-error)
   (cond
    ((procedure? x) (if cold-run
-		       (begin (display "CALL:") (display x) (newline))
-		       (execute-after (x file) file on-success on-error)))
+		       (begin (display "(call) ") (display x) (newline))
+		       (execute-after (x file current-mime) file on-success on-error)))
    ((list? x) (if cold-run
 	          (begin (display "(run) ") (display (string-join x " ")) (newline))
 	          (execute-after (apply system* (fix-command x file)) file on-success on-error)))
@@ -186,22 +220,19 @@
           (run-fn-or-system command file on-success on-error)
 	  #f))))
 
-(define (make-pattern pattern)
+(define (pattern-exec pattern file)
+  (define (match-with fn)
+    (or (if current-mime (fn pattern current-mime) #f)
+	(string-match pattern file)))
   (cond
-   ((string? pattern) (make-regexp pattern))
-   ((equal? pattern '()) '())
-   ((list? pattern) (cons (make-pattern (car pattern)) (make-pattern (cdr pattern))))))
-
-(define (pattern-matches pattern file)
-  (cond
-   ((string? pattern) (or (if current-mime (string-match pattern current-mime) #f)
-			  (string-match pattern file)))
-   ((list? pattern) (any identity (map (λ (ptrn) (pattern-matches ptrn file)) pattern)))))
+   ((string? pattern) (match-with string-match))
+   ((regexp? pattern) (match-with regexp-exec))
+   ((list? pattern) (any identity (map (λ (ptrn) (pattern-exec ptrn file)) pattern)))))
 
 (define* (assoc #:key program pattern term tmux screen standalone on-error on-success test on-fail #:allow-other-keys #:rest r)
   (set! assoc-list (list-append assoc-list
   (λ (file)
-    (if (pattern-matches pattern file)
+    (if (pattern-exec pattern file)
 	(let ((rest (make-paired r))
 	      (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
 	  (when (and (not test-result) on-fail)
@@ -212,6 +243,13 @@
 		#t)
 	      #f))
 	#f)))))
+
+(define (run-assoc-list file ls)
+  (cond
+   ((null? ls) #f)
+   (((car ls) file) #t)
+   (else
+    (run-assoc-list file (cdr ls)))))
 
 (define (main args)
   (let* ((option-spec '((mime-type (single-char #\t) (value #f))
