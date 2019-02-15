@@ -1,0 +1,239 @@
+#!/bin/guile \
+-e main -s
+!#
+
+(use-modules (ice-9 regex)
+	     (ice-9 rdelim)
+	     (ice-9 popen)
+	     (ice-9 getopt-long)
+	     (srfi srfi-1))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; State :/
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define cold-run #f)
+(define runner-method #f)
+(define current-mime #f)
+(define assoc-list '())
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; scheme utilities
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (substring-replace str sub rep)
+  "Replace all occurrences of SUB in STR with REP"
+  (regexp-substitute/global #f sub str 'pre rep 'post))
+
+(define (getenv* var def)
+  "Get environment variable VAR, if it does not exists return default value DEF"
+  (let* ((x (getenv var))
+	 (y (if x x def)))
+    y))
+
+(define (make-paired ls)
+  "Turn (a b c d e f) into ((a . b) (c . d) (e . f))"
+  (cond
+   ((null? ls) '())
+   (else (cons (list (car ls) (cadr ls)) (make-paired (cddr ls))))))
+
+(define (list-append lst e)
+   (if (null? lst)
+       (list e)
+       (cons (car lst)
+             (list-append (cdr lst) e))))
+
+(define xor
+  (lambda (a b)
+    (cond
+      (a (not b))
+      (else b))))
+
+(define (string-first-line str)
+  (car (string-split str #\newline)))
+
+(define (read-sys-out cmd)
+  (with-error-to-port (%make-void-port "w")
+    (λ ()
+      (let* ((port (apply open-pipe* (cons OPEN_READ cmd)))
+	     (out (read-string port)))
+        (if (equal? 0 (close-pipe port))
+	    out
+	    #f)))))
+
+(define (path->abs path)
+  (cond
+   ((equal? (string-ref path 0) #\/) path)
+   (else (string-append (string-trim-right (getcwd) #\/) "/" path))))
+
+(define regexp/url (make-regexp "^[a-zA-Z]+:"))
+
+(define (path->uri path)
+  (cond
+   ((regexp-exec regexp/url path) path)
+   (else (string-append "file://" (path->abs path)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; other utilities
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define assoc-file-path
+  (string-append (getenv* "XDG_CONFIG_HOME"
+			  (string-append (getenv "HOME") "/.config/"))
+		 "associations"))
+
+(define log-file-path
+  (string-append (getenv* "XDG_CACHE_HOME"
+			  (string-append (getenv "HOME") "/.cache/"))
+		 "o.log"))
+
+(define (mime-type f)
+  (cond
+   ((not (file-exists? f)) #f)
+   (else
+    (let ((pmime (read-sys-out `("mimetype" "--brief" "--dereference" ,f))))
+      (if pmime
+	  (string-first-line pmime)
+	  (string-first-line (read-sys-out `("file" "--brief" "--dereference" "--mime-type" ,f))))))))
+
+(define (append-log text)
+  (let ((log-file (open-file log-file-path "a")))
+    (display text log-file)
+    (newline log-file)
+    (close log-file)))
+
+(define (append-command cmd1 cmd2 standalone)
+  (if standalone
+      cmd1
+      (cond
+       ((and (list? cmd1) (list? cmd2)) (append cmd1 cmd2))
+       ((and (list? cmd1) (string? cmd2)) (string-join (list-append cmd1 cmd2) " "))
+       ((and (string? cmd1) (list? cmd2)) (string-join (cons cmd1 cmd2) " "))
+       ((and (string? cmd1) (string? cmd2)) (string-append cmd1 " " cmd2)))))
+
+(define (get-runner-program rest)
+  (if runner-method
+      (let ((result (filter (λ (pair) (equal? (car pair) runner-method)) rest)))
+	(if (pair? result) (cadar result) #f))
+      #f))
+
+(define (fix-command cmd file)
+  (define (helper cmd file escape?)
+    (define (escape f)
+      (if escape?
+        (string-append "'" f "'")
+	f))
+
+    (cond
+     ((list? cmd) (map (λ (cmd) (helper cmd file escape?)) cmd))
+     ((string? cmd) (let ((str cmd))
+		      (when (equal? (string-ref str 0) #\~)
+			(set! str (string-append (getenv "HOME") (substring str 1))))
+		      (set! str (substring-replace str "%f" (escape file)))
+		      (set! str (substring-replace str "%F" (escape (path->abs file))))
+		      (set! str (substring-replace str "%U" (escape (path->uri file))))
+		      str))))
+  (helper cmd file (string? cmd)))
+
+(define (run-assoc-list file ls)
+  (cond
+   ((null? ls) #f)
+   (((car ls) file) #t)
+   (else
+    (run-assoc-list file (cdr ls)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; main functionality
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define* (execute-after exit-code file #:optional on-success on-error)
+  (cond
+   ((or (and (number? exit-code)
+	     (= exit-code 0))
+	(and (not (number? exit-code))
+	     (not (equal? exit-code #f)))) (if on-success
+					       (run-fn-or-system on-success file)
+					       #t))
+   (on-error (run-fn-or-system on-error file))
+   (else #f)))
+
+;; TODO: add logging
+(define* (run-fn-or-system x file #:optional on-success on-error)
+  (cond
+   ((procedure? x) (if cold-run
+		       (begin (display "CALL:") (display x) (newline))
+		       (execute-after (x file) file on-success on-error)))
+   ((list? x) (if cold-run
+	          (begin (display "(run) ") (display (string-join x " ")) (newline))
+	          (execute-after (apply system* (fix-command x file)) file on-success on-error)))
+   ((string? x) (if cold-run
+		    (begin (display "(run) ") (display x) (newline))
+		    (execute-after (system (fix-command x file)) file on-success on-error)))))
+
+;; TODO: inline this?
+(define (execute program term tmux screen standalone on-success on-error rest file)
+  (let ((command program))
+    (when (and term (not (isatty? (current-input-port))))
+      (set! command (append-command term program standalone)))
+    (when (and tmux (getenv "TMUX"))
+      (set! command (append-command tmux program standalone)))
+    (when (and screen (getenv "STY"))
+      (set! command (append-command screen program standalone)))
+    (let ((runner-program (get-runner-program rest)))
+      (when runner-program
+        (set! command runner-program))
+      (if (not (xor runner-program runner-method))
+          (run-fn-or-system command file on-success on-error)
+	  #f))))
+
+(define (make-pattern pattern)
+  (cond
+   ((string? pattern) (make-regexp pattern))
+   ((equal? pattern '()) '())
+   ((list? pattern) (cons (make-pattern (car pattern)) (make-pattern (cdr pattern))))))
+
+(define (pattern-matches pattern file)
+  (cond
+   ((string? pattern) (or (if current-mime (string-match pattern current-mime) #f)
+			  (string-match pattern file)))
+   ((list? pattern) (any identity (map (λ (ptrn) (pattern-matches ptrn file)) pattern)))))
+
+(define* (assoc #:key program pattern term tmux screen standalone on-error on-success test on-fail #:allow-other-keys #:rest r)
+  (set! assoc-list (list-append assoc-list
+  (λ (file)
+    (if (pattern-matches pattern file)
+	(let ((rest (make-paired r))
+	      (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
+	  (when (and (not test-result) on-fail)
+	    (set! program on-fail))
+	  (if (or test-result on-fail)
+	      (begin
+		(execute program term tmux screen standalone on-success on-error rest file)
+		#t)
+	      #f))
+	#f)))))
+
+(define (main args)
+  (let* ((option-spec '((mime-type (single-char #\t) (value #f))
+			(cold-run (single-char #\c) (value #f))
+			(assoc-file (single-char #\f) (value #t))
+			(method (single-char #\m) (value #t))
+			(help (single-char #\h) (value #f))))
+	 (options (getopt-long args option-spec))
+	 (cold-run? (option-ref options 'cold-run #f))
+	 (mime? (option-ref options 'mime-type #f))
+	 (method? (option-ref options 'method #f))
+	 (assoc-file? (option-ref options 'mime assoc-file-path))
+	 (help? (option-ref options 'help #f))
+	 (url (car (option-ref options '() #f))))
+    (cond
+     (mime? (begin (display (mime-type url)) (newline)))
+     (help? (display "here is your help!"))
+     (else
+      (set! cold-run cold-run?)
+      (set! current-mime (mime-type url))
+      (when method?
+	(set! runner-method (symbol->keyword (string->symbol method?))))
+      (load assoc-file-path)
+      (when (and (not (run-assoc-list url assoc-list)) (not cold-run?))
+	(append-log (string-append "in:" url)))))))
