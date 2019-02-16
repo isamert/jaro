@@ -125,7 +125,7 @@ Examples:
 Like `#:tmux` but for `screen`.
 
 ### #:standalone
-If this is set to `#t`, `#:term`, `#:tmux`, `#:screen` will be run standalone, instead of appending before `#:program`. This is useful for using different programs in different working environments.
+If this is set to `#t`; `#:term`, `#:tmux`, `#:screen` will be run standalone, instead of appending before `#:program`. This is useful for using different programs in different working environments.
 
 ### #:test
 A test command. If `#:pattern` is matched and `#:test` is present, before calling the `#:program`, `jaro` will run `#:test`. If command exits with `0`, `#:program` will be run. Otherwise `jaro` will skip this association like it hasn't been matched. Like `#:program`, this should be either a string or list of strings.
@@ -149,7 +149,7 @@ Command to run if `#:program` (or `#:on-fail`, `#:term`, `#:tmux`, `#:screen`) e
 
 Example:
 ```scheme
-;; Open images with sxiv. If it fails to open image, open the image with feh.
+;; Open images with sxiv. If it fails to open image, opens the image with feh.
 (assoc
   #:pattern '"^image/.*$"
   #:program "sxiv %f"
@@ -176,5 +176,7 @@ Add this association to end of your associations file. If nothing has been match
   #:term (select-alternative-with "dmenu")
   #:standalone #t)
 ```
+
+---
 
 <a name="fn1">1</a>: I'm bad at naming stuff [↩](#a1)
