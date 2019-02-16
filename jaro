@@ -126,7 +126,9 @@
        ((and (list? cmd1) (list? cmd2)) (append cmd1 cmd2))
        ((and (list? cmd1) (string? cmd2)) (string-join (list-append cmd1 cmd2) " "))
        ((and (string? cmd1) (list? cmd2)) (string-join (cons cmd1 cmd2) " "))
-       ((and (string? cmd1) (string? cmd2)) (string-append cmd1 " " cmd2)))))
+       ((and (string? cmd1) (string? cmd2)) (string-append cmd1 " " cmd2))
+       ((procedure? cmd1) cmd1)
+       (else (append-log "mixed procedure and system calls")))))
 
 (define (get-runner-program rest)
   (if runner-method
