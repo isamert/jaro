@@ -163,7 +163,7 @@ Command to run if `#:program` (or `#:on-fail`, `#:term`, `#:tmux`, `#:screen`) e
 `#:program` or derivatives can also be a lambda. You need to return `#t` or `#f` to make things work properly.
 
 ## A selection menu for non-matched
-Add this association to end of your associations file. If nothing has been matched, this association will run and present you a dialog to select which application to use. It looks for mimeinfo database and finds related programs.
+Add this association to end of your associations file. If nothing has been matched, this association will run and present you a dialog to select which application to use. It will display programs that supports opening mimetype of given file and all the binaries in your system.
 
 ```scheme
 ;; If jaro is called inside a terminal, it will use fzf for selecting the
@@ -174,6 +174,12 @@ Add this association to end of your associations file. If nothing has been match
   #:pattern ".*"
   #:program (select-alternative-with "fzf")
   #:term (select-alternative-with "dmenu")
+  #:standalone #t)
+
+;; This one uses dmenu all the time
+(assoc
+  #:pattern ".*"
+  #:program (select-alternative-with "dmenu")
   #:standalone #t)
 ```
 
