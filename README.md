@@ -161,6 +161,33 @@ Example:
 ### #:on-success
 Command to run if `#:program` (or `#:on-fail`, `#:term`, `#:tmux`, `#:screen`) exits with `0`.
 
+### Arbitrary options and different opening modes
+You can define arbitrary options (like `#:edit`, `#:view` etc. Anything but the ones explained above.) and start `jaro` with a method to use that option. For example:
+```scheme
+(assoc
+  #:pattern "^text/.*"
+  #:program "vim %f"
+  #:view "cat %f")
+```
+
+When `jaro` is started with `--method=view`, it will open given text file in `cat` instead of `#:program`. You can add arbitrary amount of opening modes. These modes, like `#:program` option, should be either a string or a list of strings (or a scheme procedure).
+
+Another example:
+```scheme
+(assoc
+  #:pattern "image/.*"
+  #:program "sxiv %f"
+  #:view "sxiv %f"
+  #:edit "gimp %f")
+```
+
+Now you can use `jaro --method=view path/to/file` or `jaro --method=edit path/to/file` to open an image. You can define aliases in your shell for these different opening modes, like for bash:
+```sh
+alias edit="jaro --method=edit"
+alias view="jaro --method=view"
+# ...
+```
+
 ### More advanced usage
 `#:program` or derivatives can also be a lambda. You need to return `#t` or `#f` to make things work properly.
 
