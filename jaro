@@ -64,7 +64,7 @@
 (define (path->abs path)
   (cond
    ((equal? (string-ref path 0) #\/) path)
-   (else (string-append (string-trim-right (getcwd) #\/) "/" path))))
+   (else (path-join (getcwd) path))))
 
 (define regexp/url (make-regexp "^[a-zA-Z]+:"))
 
@@ -73,21 +73,28 @@
    ((regexp-exec regexp/url path) path)
    (else (string-append "file://" (path->abs path)))))
 
+(define (path-join . paths)
+  (fold (λ (p path)
+         (cond
+          ((string-null? path) p)
+          ((equal? (string-ref path (1- (string-length path))) #\/) (string-append path p))
+          (else (string-append path "/" p)))) "" paths))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; other utilities
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define config-dir
-  (getenv* "XDG_CONFIG_HOME" (string-append (getenv "HOME") "/.config/")))
+  (getenv* "XDG_CONFIG_HOME" (path-join (getenv "HOME") ".config")))
 
 (define cache-dir
-  (getenv* "XDG_CACHE_HOME" (string-append (getenv "HOME") "/.cache/")))
+  (getenv* "XDG_CACHE_HOME" (path-join (getenv "HOME") ".cache")))
 
 (define assoc-file-path
-  (string-append config-dir "associations"))
+  (path-join config-dir "associations"))
 
 (define log-file-path
-  (string-append cache-dir "jaro.log"))
+  (path-join cache-dir "jaro.log"))
 
 (define (mime-type f)
   (define (mime-by ls)
@@ -149,7 +156,7 @@
      ((list? cmd) (map (λ (cmd) (helper cmd file escape?)) cmd))
      ((string? cmd) (let ((str cmd))
                       (when (equal? (string-ref str 0) #\~)
-                        (set! str (string-append (getenv "HOME") (substring str 1))))
+                        (set! str (path-join (getenv "HOME") (substring str 1))))
                       (set! str (substring-replace str "%f" (escape file)))
                       (set! str (substring-replace str "%F" (escape (path->abs file))))
                       (set! str (substring-replace str "%u" (escape (path->uri file))))
@@ -160,10 +167,9 @@
   (append-map
    (λ (path)
      (scandir path
-	      (λ (file)
-		(let ((abspath (string-append path "/" file)))
-		  (and (file-exists? abspath)
-		       (not (file-is-directory? abspath)))))))
+              (λ (file)
+                (let ((abspath (path-join path file)))
+                  (and (file-exists? abspath) (not (file-is-directory? abspath)))))))
    (string-split (getenv "PATH") #\:)))
 
 (define (read-ini-value file group key)
@@ -187,7 +193,7 @@
             #f)))))
 
 (define (read-desktop-file-value desktop-file key)
-  (read-ini-value (string-append "/usr/share/applications/" desktop-file) "Desktop Entry" key))
+  (read-ini-value (path-join "/usr/share/applications" desktop-file) "Desktop Entry" key))
 
 (define (make-desktop-file-choice f) ;; TODO: use system locale for GenericName
   (let* ((name (read-desktop-file-value f "Name"))
@@ -207,16 +213,16 @@
           (let* ((desktop-files (string-split (string-trim-right programs #\;) #\;))
                  (alternatives (map make-desktop-file-choice desktop-files))
                  (binaries (system-binary-list))
-		 (binaries* (string-join binaries "\n"))
+                 (binaries* (string-join binaries "\n"))
                  (alternatives* (string-join alternatives "\n"))
-		 (entries (string-append alternatives* "\n" binaries*))
+                 (entries (string-append alternatives* "\n" binaries*))
                  (result (string-trim-both (read-sys-out (string-append "printf '" entries "' | " cmd)))))
             (cond
-	     ((string-suffix? ")" result) (let ((result* (substring result
-								    (1+ (string-rindex result #\())
-								    (string-rindex result #\)))))
-					    (run-desktop-file result* file)))
-	     (else (display file) (system* result file))))))))
+             ((string-suffix? ")" result) (let ((result* (substring result
+                                                                    (1+ (string-rindex result #\())
+                                                                    (string-rindex result #\)))))
+                                            (run-desktop-file result* file)))
+             (else (display file) (system* result file))))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; main functionality
