@@ -11,7 +11,7 @@ jaro /path/to/some/file
 Only dependency is `guile`. Install it from your package manager. Then just put `jaro` script somewhere in your path. You can also replace `xdg-open` script with `jaro`, if you know what you are doing.
 
 # Configuration
-_jaro_ looks for the file `~/.config/associations` and loads it. It will try to match the given URI with each association in order. I'll go trough some examples that shows you associating files/uris with programs.
+_jaro_ looks for the file `~/.config/associations` and loads it. This file contains multiple `(assoc ...)` definitions and arbitrary _Scheme_ conde. `jaro` will try to match the given URI with each association in order. I'll go trough some examples that shows you associating files/uris with programs.
 
 - Here is a pretty basic rule for associating all image types with `sxiv`:
 ```scheme
@@ -52,6 +52,8 @@ _jaro_ looks for the file `~/.config/associations` and loads it. It will try to 
   #:term "st -e"
   #:tmux "tmux split-window -h")
 ```
+
+An association file may contain all of these associations and `jaro` will try to match one of them.
 
 ## Options
 ### #:pattern
@@ -159,11 +161,38 @@ Example:
 ### #:on-success
 Command to run if `#:program` (or `#:on-fail`, `#:term`, `#:tmux`, `#:screen`) exits with `0`.
 
+### Arbitrary options and different opening modes
+You can define arbitrary options (like `#:edit`, `#:view` etc. Anything but the ones explained above.) and start `jaro` with a method to use that option. For example:
+```scheme
+(assoc
+  #:pattern "^text/.*"
+  #:program "vim %f"
+  #:view "cat %f")
+```
+
+When `jaro` is started with `--method=view`, it will open given text file in `cat` instead of `#:program`. You can add arbitrary amount of opening modes. These modes, like `#:program` option, should be either a string or a list of strings (or a scheme procedure).
+
+Another example:
+```scheme
+(assoc
+  #:pattern "image/.*"
+  #:program "sxiv %f"
+  #:view "sxiv %f"
+  #:edit "gimp %f")
+```
+
+Now you can use `jaro --method=view path/to/file` or `jaro --method=edit path/to/file` to open an image. You can define aliases in your shell for these different opening modes, like for bash:
+```sh
+alias edit="jaro --method=edit"
+alias view="jaro --method=view"
+# ...
+```
+
 ### More advanced usage
 `#:program` or derivatives can also be a lambda. You need to return `#t` or `#f` to make things work properly.
 
 ## A selection menu for non-matched
-Add this association to end of your associations file. If nothing has been matched, this association will run and present you a dialog to select which application to use. It looks for mimeinfo database and finds related programs.
+Add this association to end of your associations file. If nothing has been matched, this association will run and present you a dialog to select which application to use. It will display programs that supports opening mimetype of given file and all the binaries in your system.
 
 ```scheme
 ;; If jaro is called inside a terminal, it will use fzf for selecting the
@@ -174,6 +203,12 @@ Add this association to end of your associations file. If nothing has been match
   #:pattern ".*"
   #:program (select-alternative-with "fzf")
   #:term (select-alternative-with "dmenu")
+  #:standalone #t)
+
+;; This one uses dmenu all the time
+(assoc
+  #:pattern ".*"
+  #:program (select-alternative-with "dmenu")
   #:standalone #t)
 ```
 

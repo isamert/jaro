@@ -311,11 +311,14 @@
          (mime? (option-ref options 'mime-type #f))
          (method? (option-ref options 'method #f))
          (assoc-file? (option-ref options 'mime assoc-file-path))
-         (help? (option-ref options 'help #f))
-         (url (car (option-ref options '() #f))))
+         (help? (option-ref options 'help #f)))
+
+    (define url (let ((u (option-ref options '() #f)))
+		  (if (pair? u) (car u) #f)))
     (cond
-     (mime? (begin (display (mime-type url)) (newline)))
-     (help? (display "here is your help!"))
+     (mime? (display (mime-type url)) (newline))
+     (help? (display "No help yet :( Please read the README.md file at github."))
+     ((not url) (display "No URI found.") (newline) (exit 1))
      (else
       (set! cold-run cold-run?)
       (set! current-mime (mime-type url))
