@@ -18,6 +18,7 @@
 (define runner-method #f)
 (define current-mime #f)
 (define assoc-list '())
+(define matched-exit-status #f)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; scheme utilities
@@ -278,19 +279,35 @@
    ((regexp? pattern) (match-with regexp-exec))
    ((list? pattern) (any identity (map (λ (ptrn) (pattern-exec ptrn file)) pattern)))))
 
-(define* (assoc #:key program pattern term tmux screen standalone on-error on-success test on-fail #:allow-other-keys #:rest r)
+(define* (assoc #:key
+                program
+                pattern
+                term
+                tmux
+                screen
+                standalone
+                on-error
+                on-success
+                test
+                on-fail
+                continue-on-error
+                #:allow-other-keys
+                #:rest r)
   (set! assoc-list (list-append assoc-list
   (λ (file)
     (if (pattern-exec pattern file)
-  (let ((rest (make-paired r))
-        (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
-    (when (and (not test-result) on-fail)
-      (set! program on-fail))
-    (if (or test-result on-fail)
-        (begin
-    (execute program term tmux screen standalone on-success on-error rest file)
-    #t)
-        #f))
+        (let ((rest (make-paired r))
+              (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
+          (when (and (not test-result) on-fail)
+            (set! program on-fail))
+          (if (or test-result on-fail)
+              (let ((exit-status (execute program term tmux screen standalone on-success on-error rest file)))
+                (if (and (not (equal? exit-status 0)) continue-on-error)
+                    #f
+                    (begin
+                      (set! matched-exit-status exit-status)
+                      #t)))
+              #f))
   #f)))))
 
 (define (run-assoc-list file ls)
@@ -326,5 +343,8 @@
       (when method?
         (set! runner-method (symbol->keyword (string->symbol method?))))
       (load assoc-file-path)
-      (when (and (not (run-assoc-list url assoc-list)) (not cold-run?))
-        (append-log (string-append "in:" url)))))))
+      (if (and (not (run-assoc-list url assoc-list)) (not cold-run?))
+          (begin
+            (append-log (string-append "in:" url))
+            (exit 2))
+          (exit matched-exit-status))))))
