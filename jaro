@@ -314,7 +314,8 @@
          (help? (option-ref options 'help #f)))
 
     (define url (let ((u (option-ref options '() #f)))
-		  (if (pair? u) (car u) #f)))
+                  (if (pair? u) (car u) #f)))
+
     (cond
      (mime? (display (mime-type url)) (newline))
      (help? (display "No help yet :( Please read the README.md file at github."))
