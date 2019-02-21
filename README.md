@@ -161,6 +161,29 @@ Example:
 ### #:on-success
 Command to run if `#:program` (or `#:on-fail`, `#:term`, `#:tmux`, `#:screen`) exits with `0`.
 
+### #:continue-on-error
+If this is set to `#t`; `jaro` will contiune trying to match other patterns when an error happens on the matched association. While you can control what happens when an error happens with `#:on-error`, you can't control what happens if `#:on-error` exits with an error. This is useful in situations like that. When you use `#:contiune-on-error` with `#:on-error`; jaro will call `#:on-error` first when `#:program` exits with non-zero value. If `#:error` exits successfully, jaro will stop trying to match. Otherwise it'll contiune searching for next match.
+
+Example:
+``` scheme
+(assoc
+  #:pattern '("https?://.+(png|jpg|gif)"
+              "^image/")
+  #:program "sxiv %f"
+  #:on-error "feh %f
+  #:contiune-on-error #t)
+
+(assoc
+  #:pattern "^https?://.+"
+  #:program "firefox %f")
+
+;; Consider this scenario: User opens an URL ending with `png`: "https://example.com/some_pic.png"
+;; `sxiv` is unable to open that because it does not support URLs. So `feh` will
+;; run. If feh exits successfully, nothing else will happen. But if `feh` also
+;; fails to open, jaro will contiune matching and it will open the URL with
+;; `firefox`.
+```
+
 ### Arbitrary options and different opening modes
 You can define arbitrary options (like `#:edit`, `#:view` etc. Anything but the ones explained above.) and start `jaro` with a method to use that option. For example:
 ```scheme
