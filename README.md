@@ -170,7 +170,7 @@ Example:
   #:pattern '("https?://.+(png|jpg|gif)"
               "^image/")
   #:program "sxiv %f"
-  #:on-error "feh %f
+  #:on-error "feh %f"
   #:contiune-on-error #t)
 
 (assoc
