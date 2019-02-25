@@ -151,7 +151,9 @@
   (define (helper cmd file escape?)
     (define (escape f)
       (if escape?
-          (string-append "'" (substring-replace f "'" "\\'") "'")
+          (if (string-contains f "'")
+              (string-append "\"" (substring-replace f "\"" "\\\"") "\"")
+              (string-append "'" f "'"))
           f))
     (cond
      ((list? cmd) (map (λ (cmd) (helper cmd file escape?)) cmd))
@@ -256,7 +258,7 @@
 ;; TODO: inline this?
 (define (execute program term tmux screen standalone on-success on-error rest file)
   (let ((command program))
-    (when (and term (not (isatty? (current-input-port))))
+    (when (and term (not (isatty? (current-output-port))))
       (set! command (append-command term program standalone)))
     (when (and tmux (getenv "TMUX"))
       (set! command (append-command tmux program standalone)))
@@ -322,16 +324,21 @@
                         (cold-run (single-char #\c) (value #f))
                         (assoc-file (single-char #\f) (value #t))
                         (method (single-char #\m) (value #t))
+                        (no-stdin (single-char #\N) (value #f))
                         (help (single-char #\h) (value #f))))
          (options (getopt-long args option-spec))
          (cold-run? (option-ref options 'cold-run #f))
          (mime? (option-ref options 'mime-type #f))
          (method? (option-ref options 'method #f))
+         (no-stdin? (option-ref options 'no-stdin #f))
          (assoc-file? (option-ref options 'mime assoc-file-path))
          (help? (option-ref options 'help #f)))
 
+    ;; TODO: open multiple files?
     (define url (let ((u (option-ref options '() #f)))
-                  (if (pair? u) (car u) #f)))
+                  (if (pair? u)
+                      (car u)
+                      (if no-stdin? #f (read-line)))))
 
     (cond
      (mime? (display (mime-type url)) (newline))

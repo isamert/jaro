@@ -7,6 +7,13 @@ To open some file using _jaro_, just run:
 jaro /path/to/some/file
 ```
 
+jaro can also read from `stdin`.
+``` sh
+echo "path/to/file" | jaro
+```
+
+You can disable `stdin` feature with passing `--no-stdin` parameter.
+
 # Installation
 Only dependency is `guile`. Install it from your package manager. Then just put `jaro` script somewhere in your path. You can also replace `xdg-open` script with `jaro`, if you know what you are doing.
 
@@ -162,7 +169,7 @@ Example:
 Command to run if `#:program` (or `#:on-fail`, `#:term`, `#:tmux`, `#:screen`) exits with `0`.
 
 ### #:continue-on-error
-If this is set to `#t`; `jaro` will contiune trying to match other patterns when an error happens on the matched association. While you can control what happens when an error happens with `#:on-error`, you can't control what happens if `#:on-error` exits with an error. This is useful in situations like that. When you use `#:contiune-on-error` with `#:on-error`; jaro will call `#:on-error` first when `#:program` exits with non-zero value. If `#:error` exits successfully, jaro will stop trying to match. Otherwise it'll contiune searching for next match.
+If this is set to `#t`; `jaro` will continent trying to match other patterns when an error happens on the matched association. While you can control what happens when an error happens with `#:on-error`, you can't control what happens if `#:on-error` exits with an error. This is useful in situations like that. When you use `#:continue-on-error` with `#:on-error`; jaro will call `#:on-error` first when `#:program` exits with non-zero value. If `#:on-error` exits successfully, jaro will stop trying to match. Otherwise it'll continue searching for next match.
 
 Example:
 ``` scheme
@@ -171,7 +178,7 @@ Example:
               "^image/")
   #:program "sxiv %f"
   #:on-error "feh %f"
-  #:contiune-on-error #t)
+  #:continue-on-error #t)
 
 (assoc
   #:pattern "^https?://.+"
@@ -180,7 +187,7 @@ Example:
 ;; Consider this scenario: User opens an URL ending with `png`: "https://example.com/some_pic.png"
 ;; `sxiv` is unable to open that because it does not support URLs. So `feh` will
 ;; run. If feh exits successfully, nothing else will happen. But if `feh` also
-;; fails to open, jaro will contiune matching and it will open the URL with
+;; fails to open, jaro will continue matching and it will open the URL with
 ;; `firefox`.
 ```
 
@@ -212,7 +219,7 @@ alias view="jaro --method=view"
 ```
 
 ### More advanced usage
-`#:program` or derivatives can also be a lambda. You need to return `#t` or `#f` to make things work properly.
+`#:program` or derivatives can also be a procedure. You need to return `#t` or `#f` to make things work properly.
 
 ## A selection menu for non-matched
 Add this association to end of your associations file. If nothing has been matched, this association will run and present you a dialog to select which application to use. It will display programs that supports opening mimetype of given file and all the binaries in your system.
