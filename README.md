@@ -18,7 +18,7 @@ You can disable `stdin` feature with passing `--no-stdin` parameter.
 Only dependency is `guile`. Install it from your package manager. Then just put `jaro` script somewhere in your path. You can also replace `xdg-open` script with `jaro`, if you know what you are doing.
 
 # Configuration
-_jaro_ looks for the file `~/.config/associations` and loads it. This file contains multiple `(assoc ...)` definitions and arbitrary _Scheme_ conde. `jaro` will try to match the given URI with each association in order. I'll go trough some examples that shows you associating files/uris with programs.
+_jaro_ looks for the file `~/.config/associations` and loads it. This file contains multiple `(assoc ...)` definitions and arbitrary _Scheme_ code. `jaro` will try to match the given URI with each association in order. I'll go trough some examples that shows you associating files/uris with programs.
 
 - Here is a pretty basic rule for associating all image types with `sxiv`:
 ```scheme
