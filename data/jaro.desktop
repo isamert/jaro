@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=jaro
+GenericName=Resource opener
+Terminal=false
+Exec=jaro %F
+Type=Application
+Categories=Utility;
