@@ -211,21 +211,24 @@
 
 (define (select-alternative-with cmd)
   (λ (file mime-type)
-    (let ((programs (read-ini-value "/usr/share/applications/mimeinfo.cache" "MIME Cache" mime-type)))
-      (if programs
-          (let* ((desktop-files (string-split (string-trim-right programs #\;) #\;))
-                 (alternatives (map make-desktop-file-choice desktop-files))
-                 (binaries (system-binary-list))
-                 (binaries* (string-join binaries "\n"))
-                 (alternatives* (string-join alternatives "\n"))
-                 (entries (string-append alternatives* "\n" binaries*))
-                 (result (string-trim-both (read-sys-out (string-append "printf '" entries "' | " cmd)))))
-            (cond
-             ((string-suffix? ")" result) (let ((result* (substring result
-                                                                    (1+ (string-rindex result #\())
-                                                                    (string-rindex result #\)))))
-                                            (run-desktop-file result* file)))
-             (else (display file) (system* result file))))))))
+    (let* ((programs (read-ini-value "/usr/share/applications/mimeinfo.cache" "MIME Cache" mime-type))
+           (desktop-files (if programs
+                                (string-split (string-trim-right programs #\;) #\;)
+                                '()))
+           (alternatives (map make-desktop-file-choice desktop-files))
+           (binaries (system-binary-list))
+           (binaries* (string-join binaries "\n"))
+           (alternatives* (string-join alternatives "\n"))
+           (entries (string-append alternatives* "\n" binaries*))
+           (out (read-sys-out (string-append "printf '" entries "' | " cmd)))
+           (result (if out (string-trim-both out) #f)))
+      (cond
+       ((not result) (display "Bye!") (newline))
+       ((string-suffix? ")" result) (let ((result* (substring result
+                                                              (1+ (string-rindex result #\())
+                                                              (string-rindex result #\)))))
+                                      (run-desktop-file result* file)))
+       (else (system* result file))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; main functionality
