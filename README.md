@@ -237,6 +237,16 @@ Another example:
   #:program "sxiv %f"
   #:view "sxiv %f"
   #:edit "gimp %f")
+
+;; As you can see, `#:view` and `#:program` are just the same thing,
+;; you can use `#:view #t` to avoid duplication, so this means the
+;; same thing with above:
+
+(assoc
+  #:pattern "image/.*"
+  #:program "sxiv %f"
+  #:view #t
+  #:edit "gimp %f")
 ```
 
 Now you can use `jaro --method=view path/to/file` or `jaro --method=edit path/to/file` to open an image. You can define aliases in your shell for these different opening modes, like for bash:
