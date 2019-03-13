@@ -18,6 +18,7 @@
 (define runner-method #f)
 (define current-mime #f)
 (define assoc-list '())
+(define named-assocs (make-hash-table))
 (define matched-exit-status #f)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -234,6 +235,17 @@
 ;; main functionality
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define (open-with name)
+  (λ (file mime)
+    (let ((opener (hashq-ref name)))
+      (if (not opener)
+          (begin
+            (display (symbol->string name))
+            (display " not found in associations!")
+            (newline))
+          (opener file #t)))))
+
+
 (define* (execute-after exit-code file #:optional on-success on-error)
   (cond
    ((or (and (number? exit-code)
@@ -285,6 +297,7 @@
    ((list? pattern) (any identity (map (λ (ptrn) (pattern-exec ptrn file)) pattern)))))
 
 (define* (assoc #:key
+                name
                 program
                 pattern
                 term
@@ -298,22 +311,25 @@
                 continue-on-error
                 #:allow-other-keys
                 #:rest r)
-  (set! assoc-list (list-append assoc-list
-  (λ (file)
-    (if (pattern-exec pattern file)
-        (let ((rest (make-paired r))
-              (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
-          (when (and (not test-result) on-fail)
-            (set! program on-fail))
-          (if (or test-result on-fail)
-              (let ((exit-status (execute program term tmux screen standalone on-success on-error rest file)))
-                (if (and (not (equal? exit-status 0)) continue-on-error)
-                    #f
-                    (begin
-                      (set! matched-exit-status exit-status)
-                      #t)))
-              #f))
-  #f)))))
+  (define x
+    (lambda* (file #:optional pass-test)
+      (if (or pass-test (pattern-exec pattern file))
+          (let ((rest (make-paired r))
+                (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
+            (when (and (not test-result) on-fail)
+              (set! program on-fail))
+            (if (or test-result on-fail)
+                (let ((exit-status (execute program term tmux screen standalone on-success on-error rest file)))
+                  (if (and (not (equal? exit-status 0)) continue-on-error)
+                      #f
+                      (begin
+                        (set! matched-exit-status exit-status)
+                        #t)))
+                #f))
+          #f)))
+  (set! assoc-list (list-append assoc-list x))
+  (when name
+    (hashq-set! named-assocs name x)))
 
 (define (run-assoc-list file ls)
   (cond
@@ -357,4 +373,5 @@
           (begin
             (append-log (string-append "in:" url))
             (exit 2))
-          (exit matched-exit-status))))))
+          (begin
+            (exit matched-exit-status)))))))
