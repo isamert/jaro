@@ -237,7 +237,7 @@
 
 (define (open-with name)
   (λ (file mime)
-    (let ((opener (hashq-ref name)))
+    (let ((opener (hashq-ref named-assocs name)))
       (if (not opener)
           (begin
             (display (symbol->string name))
