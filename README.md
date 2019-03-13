@@ -89,6 +89,32 @@ Examples:
 #:program '("mpv" "--autofit=1920x1080" "%f")
 ```
 
+### #:name
+An arbitrary name to label the association. With given name, you can use the association in other associations. Observe this example:
+
+``` scheme
+;; This association opens youtube videos using mpv.
+;; If mpv fails to open, it opens the youtube url with
+;; association named 'browser.
+(assoc
+  #:pattern "^https?://(www.)?youtube.com/watch\\?.*v="
+  #:program "mpv %f"
+  #:on-error (open-with 'browser))
+
+;; The 'browser association
+;; This association opens URLs in qutebrowser if it's open;
+;; if it's not open, it uses firefox.
+;; (The name should start with ')
+(assoc
+  #:name 'browser
+  #:pattern "^https?://.*"
+  #:program "qutebrowser %f"
+  #:test "pgrep qutebrowser"
+  #:on-fail "firefox %f")
+```
+
+You can also use `#:continue-on-error #t` instead of `#:on-error (open-with 'browser)` to get the same desired effect in this particular example but labeling associations makes maintaining the associations file easier in the long run.
+
 ### #:term
 The program to run `#:program` with, if `jaro` is called from outside of a terminal. This command will be prepended in front of `#:program` before calling. If `#:standalone` is set to `#t`, instead of appending before `#:program`, `#:term` will be called standalone. Like `#:program`, this should be either a string or list of strings.
 
