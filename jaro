@@ -245,7 +245,6 @@
             (newline))
           (opener file #t)))))
 
-
 (define* (execute-after exit-code file #:optional on-success on-error)
   (cond
    ((or (and (number? exit-code)
@@ -280,11 +279,16 @@
     (when (and screen (getenv "STY"))
       (set! command (append-command screen program standalone)))
     (let ((runner-program (get-runner-program rest)))
-      (when runner-program
+      (when (and runner-program (not (eqv? runner-program #t)))
         (set! command runner-program))
       (if (not (xor runner-program runner-method))
           (run-fn-or-system command file on-success on-error)
-          #f))))
+          (begin
+            (display (string-append "No #:"
+                                    (symbol->string (keyword->symbol runner-method))
+                                    " mode found in matched association."))
+            (newline)
+            #f)))))
 
 (define (pattern-exec pattern file)
   (define (match-with fn)
