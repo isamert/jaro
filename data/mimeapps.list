@@ -1,4 +1,4 @@
-[Added Associations]
+[Default Applications]
 application/1d-interleaved-parityfec=jaro.desktop;
 application/3gpdash-qoe-report+xml=jaro.desktop;
 application/3gpp-ims+xml=jaro.desktop;
@@ -2033,4 +2033,3 @@ x-scheme-handler/qute=jaro.desktop;
 x-scheme-handler/rtmp=jaro.desktop;
 x-scheme-handler/rtp=jaro.desktop;
 x-scheme-handler/rtsp=jaro.desktop;
-
