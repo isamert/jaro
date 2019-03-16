@@ -95,9 +95,6 @@
 (define assoc-file-path
   (path-join config-dir "associations"))
 
-(define log-file-path
-  (path-join cache-dir "jaro.log"))
-
 (define (mime-type f)
   (define (mime-by ls)
     (let ((mime (read-sys-out ls)))
@@ -125,12 +122,6 @@
             (mime mime)
             (else (mime-by-file f)))))))
 
-(define (append-log text)
-  (let ((log-file (open-file log-file-path "a")))
-    (display text log-file)
-    (newline log-file)
-    (close log-file)))
-
 (define (append-command cmd1 cmd2 standalone)
   (if standalone
       cmd1
@@ -140,7 +131,7 @@
        ((and (string? cmd1) (list? cmd2)) (string-join (cons cmd1 cmd2) " "))
        ((and (string? cmd1) (string? cmd2)) (string-append cmd1 " " cmd2))
        ((procedure? cmd1) cmd1)
-       (else (append-log "mixed procedure and system calls")))))
+       (else (error "jaro: Mixed procedure and system calls:")))))
 
 (define (get-runner-program rest)
   (if runner-method
@@ -256,7 +247,6 @@
    (on-error (run-fn-or-system on-error file))
    (else #f)))
 
-;; TODO: add logging
 (define* (run-fn-or-system x file #:optional on-success on-error)
   (cond
    ((procedure? x) (if cold-run
@@ -374,8 +364,5 @@
         (set! runner-method (symbol->keyword (string->symbol method?))))
       (load assoc-file-path)
       (if (and (not (run-assoc-list url assoc-list)) (not cold-run?))
-          (begin
-            (append-log (string-append "in:" url))
-            (exit 2))
-          (begin
-            (exit matched-exit-status)))))))
+          (error (string-append "Nothing found for " url))
+          (exit matched-exit-status))))))
