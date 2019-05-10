@@ -139,7 +139,7 @@
         (if (pair? result) (cadar result) #f))
       #f))
 
-(define (fix-command cmd file)
+(define (fix-command cmd file pattern)
   (define (helper cmd file escape?)
     (define (escape f)
       (if escape?
@@ -155,6 +155,17 @@
                       (set! str (substring-replace str "%f" (escape file)))
                       (set! str (substring-replace str "%F" (escape (path->abs file))))
                       (set! str (substring-replace str "%u" (escape (path->uri file))))
+                      ;; Replace capture groups with %0 %1 %2...
+                      (set! pattern (pattern-exec pattern file))
+                      (when pattern
+                       (for-each
+                        (λ (i) (let ((captured (match:substring pattern i)))
+                                 (when captured
+                                   (set! str (substring-replace
+                                              str
+                                              (string-append "%" (number->string i))
+                                              captured)))))
+                        (iota (match:count pattern))))
                       str))))
   (helper cmd file (string? cmd)))
 
@@ -236,31 +247,32 @@
             (newline))
           (opener file #t)))))
 
-(define* (execute-after exit-code file #:optional on-success on-error)
+(define* (execute-after exit-code file pattern #:optional on-success on-error)
   (cond
    ((or (and (number? exit-code)
              (= exit-code 0))
         (and (not (number? exit-code))
              (not (equal? exit-code #f)))) (if on-success
-                                               (run-fn-or-system on-success file)
+                                               (run-fn-or-system on-success file pattern)
                                                #t))
-   (on-error (run-fn-or-system on-error file))
+   (on-error (run-fn-or-system on-error file pattern))
    (else #f)))
 
-(define* (run-fn-or-system x file #:optional on-success on-error)
+(define* (run-fn-or-system x file pattern #:optional on-success on-error)
+  (define fixed-command (fix-command x file pattern))
   (cond
    ((procedure? x) (if cold-run
                        (begin (display "(call) ") (display x) (newline))
-                       (execute-after (x file current-mime) file on-success on-error)))
+                       (execute-after (x file current-mime) file pattern on-success on-error)))
    ((list? x) (if cold-run
                   (begin (display "(run) ") (display (string-join x " ")) (newline))
-                  (execute-after (apply system* (fix-command x file)) file on-success on-error)))
+                  (execute-after (apply system* fixed-command) file pattern on-success on-error)))
    ((string? x) (if cold-run
                     (begin (display "(run) ") (display x) (newline))
-                    (execute-after (system (fix-command x file)) file on-success on-error)))))
+                    (execute-after (system fixed-command) file pattern on-success on-error)))))
 
 ;; TODO: inline this?
-(define (execute program term tmux screen standalone on-success on-error rest file)
+(define (execute program pattern term tmux screen standalone on-success on-error rest file)
   (let ((command program))
     (when (and term (not (isatty? (current-output-port))))
       (set! command (append-command term program standalone)))
@@ -272,7 +284,7 @@
       (when (and runner-program (not (eqv? runner-program #t)))
         (set! command runner-program))
       (if (not (xor runner-program runner-method))
-          (run-fn-or-system command file on-success on-error)
+          (run-fn-or-system command file pattern on-success on-error)
           (begin
             (display (string-append "No #:"
                                     (symbol->string (keyword->symbol runner-method))
@@ -283,12 +295,17 @@
 (define (pattern-exec pattern file)
   (define (match-with fn)
     (or (if current-mime (fn pattern current-mime) #f)
-        (string-match pattern file)))
-
+        (fn pattern file)))
   (cond
    ((string? pattern) (match-with string-match))
    ((regexp? pattern) (match-with regexp-exec))
    ((list? pattern) (any identity (map (λ (ptrn) (pattern-exec ptrn file)) pattern)))))
+
+(define (compile-pattern pattern)
+  (cond
+   ((string? pattern) (make-regexp pattern))
+   ((regexp? pattern) pattern)
+   ((list? pattern) (map (λ (ptrn) (compile-pattern ptrn)) pattern))))
 
 (define* (assoc #:key
                 name
@@ -307,13 +324,14 @@
                 #:rest r)
   (define x
     (lambda* (file #:optional pass-test)
+      (set! pattern (compile-pattern pattern))
       (if (or pass-test (pattern-exec pattern file))
           (let ((rest (make-paired r))
-                (test-result (not (xor test (if test (run-fn-or-system test file) #f)))))
+                (test-result (not (xor test (if test (run-fn-or-system test file pattern) #f)))))
             (when (and (not test-result) on-fail)
               (set! program on-fail))
             (if (or test-result on-fail)
-                (let ((exit-status (execute program term tmux screen standalone on-success on-error rest file)))
+                (let ((exit-status (execute program pattern term tmux screen standalone on-success on-error rest file)))
                   (if (and (not (equal? exit-status 0)) continue-on-error)
                       #f
                       (begin
