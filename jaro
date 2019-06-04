@@ -156,8 +156,8 @@
                       (set! str (substring-replace str "%F" (escape (path->abs file))))
                       (set! str (substring-replace str "%u" (escape (path->uri file))))
                       ;; Replace capture groups with %0 %1 %2...
-                      (set! pattern (pattern-exec pattern file))
-                      (when pattern
+                      (when (and pattern (not (list? pattern)))
+                       (set! pattern (pattern-exec pattern file))
                        (for-each
                         (λ (i) (let ((captured (match:substring pattern i)))
                                  (when captured
