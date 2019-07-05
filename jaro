@@ -172,11 +172,12 @@
 (define (system-binary-list)
   (append-map
    (λ (path)
-     (scandir path
-              (λ (file)
-                (let ((abspath (path-join path file)))
-                  (and (file-exists? abspath) (not (file-is-directory? abspath)))))))
-   (string-split (getenv "PATH") #\:)))
+     (or (scandir path
+                  (λ (file)
+                    (let ((abspath (path-join path file)))
+                      (and (file-exists? abspath) (not (file-is-directory? abspath))))))
+         '()))
+     (string-split (getenv "PATH") #\:)))
 
 (define (read-ini-value file group key)
   (define current-group #f)
