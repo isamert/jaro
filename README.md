@@ -76,6 +76,18 @@ Examples:
 #:pattern '("^application/(x-)?(pdf)$" "^text/postscript$") ;; pdf and postscript files
 ```
 
+Patterns may also contain capture groups. You can use these capture groups in `#:program` and it's derivatives with `%1,%2,%3...`. For example:
+
+``` scheme
+(assoc
+    #:pattern "([0-9]+) - (.+)\.mp3"
+    #:program 'notify-send 'Playing track number %1' 'Track name: %2'; mpv %f")
+;; Suppose you called `jaro "02 - From Scythe to Sceptre.mp3"`,
+;; It'll send a notification saying "Playing track number 2, Track name: From Scythe to Sceptre" then open it using mpv.
+```
+
+Capture groups do not work when you use list of patterns instead of a single pattern.
+
 ### #:program
 The program to open with. This is required. This can either be a string or a list of strings. If it's a string, it will be run in a shell, like `/bin/sh`. If it's a list of strings, the program will be run directly. Before running, some substitution happens:
 - `%f` is replaced with given relative path, it will be the path that you called `jaro` with.
