@@ -81,7 +81,7 @@ Patterns may also contain capture groups. You can use these capture groups in `#
 ``` scheme
 (assoc
     #:pattern "([0-9]+) - (.+)\.mp3"
-    #:program 'notify-send 'Playing track number %1' 'Track name: %2'; mpv %f")
+    #:program "notify-send 'Playing track number %1' 'Track name: %2'; mpv %f")
 ;; Suppose you called `jaro "02 - From Scythe to Sceptre.mp3"`,
 ;; It'll send a notification saying "Playing track number 2, Track name: From Scythe to Sceptre" then open it using mpv.
 ```
