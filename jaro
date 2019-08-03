@@ -333,7 +333,7 @@
               (set! program on-fail))
             (if (or test-result on-fail)
                 (let ((exit-status (execute program pattern term tmux screen standalone on-success on-error rest file)))
-                  (if (and (not (equal? exit-status 0)) continue-on-error)
+                  (if (and (not (or (equal? exit-status 0) exit-status)) continue-on-error)
                       #f
                       (begin
                         (set! matched-exit-status exit-status)
