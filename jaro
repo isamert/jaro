@@ -1,5 +1,5 @@
-#!/bin/guile \
--e main -s
+#!/usr/bin/env sh
+exec guile --no-auto-compile -e main -s "$0" "$@"
 !#
 
 (use-modules (ice-9 regex)
