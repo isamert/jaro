@@ -2,387 +2,299 @@
 exec guile -e main -s "$0" "$@"
 !#
 
-(use-modules (ice-9 regex)
-             (ice-9 rdelim)
-             (ice-9 popen)
-             (ice-9 ftw)
-             (ice-9 getopt-long)
-             (web uri)
-             (srfi srfi-1))
+(use-modules
+ (ice-9 regex)
+ (ice-9 rdelim)
+ (ice-9 popen)
+ (ice-9 match)
+ (ice-9 ftw)
+ (ice-9 pretty-print)
+ (ice-9 poe)
+ (ice-9 getopt-long)
+ (web uri)
+ (srfi srfi-1))
 
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; State :/
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; State
+;;
 
-(setlocale LC_ALL "")
-(define cold-run #f)
-(define runner-method #f)
-(define current-mime #f)
-(define assoc-list '())
-(define named-assocs (make-hash-table))
-(define matched-exit-status #f)
+(define jaro-assocs (make-hash-table))
+(define jaro/named-assocs (make-hash-table))
+(define jaro/assocs '(()))
 
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; scheme utilities
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Extensions
+;;
 
-(define (substring-replace str sub rep)
-  "Replace all occurrences of SUB in STR with REP"
-  (regexp-substitute/global #f sub str 'pre rep 'post))
+;; Source for -> and ->> macros:
+;; https://github.com/joshwalters/guile-pipe
 
-(define (getenv* var def)
-  "Get environment variable VAR, if it does not exists return default value DEF"
-  (let* ((x (getenv var))
-    (y (if x x def)))
-    y))
+(define-syntax ->
+  (syntax-rules ()
+                ((_) #f)
+                ((_ x) x)
+                ((_ x (f . (f-rest ...))) (f x f-rest ...))
+                ((_ x f) (f x))
+                ((_ x (f . (f-rest ...)) rest ...) (-> (f x f-rest ...) rest ...))
+                ((_ x f rest ...) (-> (f x) rest ...))))
 
-(define (make-paired ls)
-  "Turn (a b c d e f) into ((a . b) (c . d) (e . f))"
-  (cond
-   ((null? ls) '())
-   (else (cons (list (car ls) (cadr ls)) (make-paired (cddr ls))))))
+(define-syntax ->>
+  (syntax-rules ()
+                ((_) #f)
+                ((_ x) x)
+                ((_ x (f ...)) (f ... x))
+                ((_ x f) `(f x))
+                ((_ x (f ...) rest ...) (->> (f ... x) rest ...))
+                ((_ x f rest ...) (->> (f x) rest ...))))
 
-(define (list-append lst e)
-   (if (null? lst)
-       (list e)
-       (cons (car lst)
-             (list-append (cdr lst) e))))
+(define-syntax if-let
+  (syntax-rules ()
+    ((if-let ((var value) ...)
+             consequent ...)
+     (let ((var value) ...)
+       (if (and var ...)
+           consequent ...)))))
 
-(define xor
-  (lambda (a b)
-    (cond
-     (a (not b))
-     (else b))))
+(define-syntax when-let
+  (syntax-rules ()
+    ((when-let (binding)
+               body ...)
+     (if-let (binding)
+             (begin body ...)))))
 
-(define (string-first-line str)
-  (string-trim-both (car (string-split str #\newline))))
+;;
+;; Utils
+;;
+
+(define specified? (compose not unspecified?))
 
 (define (read-sys-out cmd)
   (let* ((port (cond
                 ((string? cmd) (open-input-pipe cmd))
                 ((list? cmd) (apply open-pipe* (cons OPEN_READ cmd)))))
          (out (read-string port)))
-    (if (equal? 0 (close-pipe port)) out #f)))
+    (cond
+     ((equal? 0 (close-pipe port)) (string-split (string-trim-both out) #\newline))
+     (#t #f))))
+
+;; https://github.com/alezost/guile-config/blob/master/modules/al/plists.scm
+(define (plist-get plist property)
+  "Return a value of PROPERTY from PLIST.
+Return #f if PROPERTY does not exist."
+  (match plist
+    ((prop val rest ...)
+     (if (eq? prop property)
+         val
+         (plist-get rest property)))
+    (_ #f)))
+
+;;
+;; Mimetype
+;;
+
+(define (mimetype-by command)
+  "Extract the mimetype from the output of the COMMAND."
+  (let ((mime (read-sys-out command)))
+    (and mime (car mime))))
+
+(define (mimetype-of-uri URI)
+  "Get the mimetype of given URI."
+  (let ((uri (string->uri URI)))
+    (and
+     uri
+     (->>
+      (uri-scheme uri)
+      (symbol->string)
+      (string-append "x-scheme-handler/")))))
+
+(define (mimetype-of-file file)
+  "Get the mimetype of FILE using `mimetype' binary."
+  (let ((mimetype
+         (or
+          (mimetype-by `("mimetype" "--brief" "--dereference" ,file))
+          (mimetype-by `("file" "--brief" "--dereference" "--mime-type" ,file)))))
+    (and (not (string-null? mimetype)) mimetype)))
+
+(define mimetype
+  (pure-funcq
+   (λ (path)
+     "Get mimetype of given PATH."
+     (or
+      (mimetype-of-uri path)
+      (mimetype-of-file path)))))
+
+;;
+;; Pattern
+;;
+
+(define (pattern-matches? pattern input)
+  "Check if PATTERN matches with the INPUT."
+  (cond
+   ((regexp? pattern) (regexp-exec pattern input))
+   ((list? pattern) (any identity (map (λ (it) (pattern-matches? it input)) pattern)))))
+
+(define (compile-pattern pattern)
+  "Compile given PATTERN into regexp or list of regexpes."
+  (cond
+   ((string? pattern) (make-regexp pattern))
+   ((regexp? pattern) pattern)
+   ((list? pattern) (map compile-pattern pattern))))
+
+(define running-environment
+  (let ((current-environment #f))
+    (λ ()
+      "Return the current environment.
+It can be either 'gui, 'term, 'tmux, 'screen."
+      (unless current-environment
+        (set!
+         current-environment
+         (cond
+          ((isatty? (current-output-port)) 'term)
+          ((getenv "TMUX") 'tmux)
+          ((getenv "STY") 'screen)
+          (else 'gui))))
+      current-environment)))
+
+(define (assoc->runner assoc)
+  "Get the running strategy for given ASSOC based on the environment."
+  (let ((default (plist-get assoc #:program)))
+    (case (running-environment)
+      ((tmux) (or (plist-get assoc #:tmux) default))
+      ((screen) (or (plist-get assoc #:screen) default))
+      ((term) (or (plist-get assoc #:term) default))
+      (else default))))
+
+;;
+;; Running programs
+;;
+
+;; TODO: maybe extend this, so that user can define what happens on
+;; each exit code.  like #:exit-0 "this" #:exit-555 "that"
+(define (map-exit-code code)
+  (case code
+    ((0) #t)
+    (else #f)))
+
+(define (program? it)
+  "Return if IT is a runnable thing or not."
+  (or (string? it)
+      (procedure? it)
+      (and (list? it) (not (null-list? it)))
+      (and (symbol? it) (hashq-get-handle jaro/named-assocs it))))
+
+(define (run-program program pattern input)
+  (cond
+   ((procedure? program) (program
+                          input
+                          (mimetype input)
+                          (get-matches program pattern input)))
+   ((list? program) (->>
+                     (format-program program pattern input)
+                     (apply system*)
+                     (map-exit-code)))
+   ((string? program) (->>
+                       (format-program program pattern input)
+                       (system)
+                       (map-exit-code)))
+   (else (->>
+          (hashq-get-handle jaro/named-assocs program)
+          (car)
+          (assoc->runner)
+          (run-program XD pattern input)))))
+
+(define (run-assoc assoc input alternatives)
+  (let ((pattern (plist-get assoc #:pattern)))
+    (case (run-program (assoc->runner assoc) pattern input)
+      ((#t)
+       (when-let ((on-success (plist-get assoc #:on-success)))
+         (run-program pattern on-success input)))
+      (else
+       (let ((on-error (plist-get assoc #:on-error)))
+         (cond
+          ((program? on-error) (run-program pattern on-error input))
+          ((eq? on-error 'continue) (run-assoc (car alternatives) input (cdr alternatives)))
+          ((eq? on-error #f) (display "Program exited with non-0 and no #:on-error found."))
+          (else (display "run-assoc error!"))))))))
+
+;;
+;; Path ops
+;;
+
+(define regexp/url (make-regexp "^[a-zA-Z]+:"))
+
+(define (string-last-char str)
+  (string-ref str (1- (string-length str))))
+
+(define (path-join . paths)
+  (define (joiner current-path full-path)
+    (cond
+     ((string-null? full-path) current-path)
+     ((equal? (string-last-char full-path) #\/) (string-append full-path current-path))
+     (else (string-append full-path "/" current-path))))
+  (fold joiner  "" paths))
 
 (define (path->abs path)
   (cond
    ((equal? (string-ref path 0) #\/) path)
    (else (path-join (getcwd) path))))
 
-(define regexp/url (make-regexp "^[a-zA-Z]+:"))
-
 (define (path->uri path)
   (cond
    ((regexp-exec regexp/url path) path)
    (else (string-append "file://" (path->abs path)))))
 
-(define (path-join . paths)
-  (fold (λ (p path)
-         (cond
-          ((string-null? path) p)
-          ((equal? (string-ref path (1- (string-length path))) #\/) (string-append path p))
-          (else (string-append path "/" p)))) "" paths))
+;;
+;; Formatter related
+;;
 
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; other utilities
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (substring-replace str sub rep)
+  "Replace all occurrences of SUB in STR with REP"
+  (regexp-substitute/global #f sub str 'pre rep 'post))
 
-(define config-dir
-  (getenv* "XDG_CONFIG_HOME" (path-join (getenv "HOME") ".config")))
+(define (get-matches program pattern input)
+  (let* ((matches (regexp-exec pattern input)))
+    (map
+     (λ (it)
+       `(,(string-append "%" (number->string it))
+         . ,(match:substring matches it)))
+     (iota (match:count matches) 1))))
 
-(define cache-dir
-  (getenv* "XDG_CACHE_HOME" (path-join (getenv "HOME") ".cache")))
+(define (replace-matches program pattern input)
+  (fold
+   (λ (it all)
+     (substring-replace all (car it) (cdr it)))
+   program
+   (get-matches program pattern input)))
 
-(define assoc-file-path
-  (path-join config-dir "associations"))
-
-(define (mime-type f)
-  (define (mime-by ls)
-    (let ((mime (read-sys-out ls)))
-      (if mime
-          (string-first-line mime)
-          #f)))
-
-  (define (mime-by-mimetype f)
-    (mime-by `("mimetype" "--brief" "--dereference" ,f)))
-
-  (define (mime-by-file f)
-    (mime-by `("file" "--brief" "--dereference" "--mime-type" ,f)))
-
-  (define (mime-by-uri-scheme f)
-    (let ((uri (string->uri f)))
-      (if uri
-          (string-append "x-scheme-handler/" (symbol->string (uri-scheme uri)))
-          #f)))
-
+(define (format-program program pattern input)
   (cond
-   ((not (file-exists? f)) (mime-by-uri-scheme f))
-   (else (let ((mime (mime-by-mimetype f)))
-           (cond
-            ((and mime (string-null? mime)) (mime-by-uri-scheme f))
-            (mime mime)
-            (else (mime-by-file f)))))))
+   ((list? program) (map (λ (it) (format-program it pattern input)) program))
+   ((string? program)
+    (->
+     ;; FIXME: (regexp-exec) is called in replace-matches repeadetly, maybe optimize that
+     (replace-matches program pattern input)
+     (substring-replace "%f" input)
+     (substring-replace "%F" (path->abs input))
+     (substring-replace "%u" (path->uri input))))))
 
-(define (append-command cmd1 cmd2 standalone)
-  (if standalone
-      cmd1
-      (cond
-       ((and (list? cmd1) (list? cmd2)) (append cmd1 cmd2))
-       ((and (list? cmd1) (string? cmd2)) (string-join (list-append cmd1 cmd2) " "))
-       ((and (string? cmd1) (list? cmd2)) (string-join (cons cmd1 cmd2) " "))
-       ((and (string? cmd1) (string? cmd2)) (string-append cmd1 " " cmd2))
-       ((procedure? cmd1) cmd1)
-       (else (error "jaro: Mixed procedure and system calls:")))))
+;;
+;; Main
+;;
 
-(define (get-runner-program rest)
-  (if runner-method
-      (let ((result (filter (λ (pair) (equal? (car pair) runner-method)) rest)))
-        (if (pair? result) (cadar result) #f))
-      #f))
+;; (begin
+;;   (define input "/home/isa/a.json")
+;;   (let* ((candidates (filter (λ (it) (pattern-matches? (plist-get it #:pattern) input)) jaro/assocs))
+;;          (assoc (car candidates))
+;;          (alternatives (cdr candidates)))
+;;     (run-assoc assoc input alternatives)))
 
-(define (fix-command cmd file pattern)
-  (define (helper cmd file escape?)
-    (define (escape f)
-      (if escape?
-          (if (string-contains f "'")
-              (string-append "\"" (substring-replace f "\"" "\\\"") "\"")
-              (string-append "'" f "'"))
-          f))
-    (cond
-     ((list? cmd) (map (λ (cmd) (helper cmd file escape?)) cmd))
-     ((string? cmd) (let ((str cmd))
-                      (when (equal? (string-ref str 0) #\~)
-                        (set! str (path-join (getenv "HOME") (substring str 1))))
-                      (set! str (substring-replace str "%f" (escape file)))
-                      (set! str (substring-replace str "%F" (escape (path->abs file))))
-                      (set! str (substring-replace str "%u" (escape (path->uri file))))
-                      ;; Replace capture groups with %0 %1 %2...
-                      (when (and pattern (not (list? pattern)))
-                       (set! pattern (pattern-exec pattern file))
-                       (for-each
-                        (λ (i) (let ((captured (match:substring pattern i)))
-                                 (when captured
-                                   (set! str (substring-replace
-                                              str
-                                              (string-append "%" (number->string i))
-                                              captured)))))
-                        (iota (match:count pattern))))
-                      str))))
-  (helper cmd file (string? cmd)))
 
-(define (system-binary-list)
-  (append-map
-   (λ (path)
-     (or (scandir path
-                  (λ (file)
-                    (let ((abspath (path-join path file)))
-                      (and (file-exists? abspath) (not (file-is-directory? abspath))))))
-         '()))
-     (string-split (getenv "PATH") #\:)))
+;; (set! jaro/assocs '())
+;; (pretty-print jaro/assocs)
 
-(define (read-ini-value file group key)
-  (define current-group #f)
-  (with-input-from-file file
-    (λ ()
-      (let loop ((line (read-line)))
-        (if (not (eof-object? line))
-            (begin
-              (set! line (string-trim-both line))
-              (cond
-               ((or (equal? (string-ref line 0) #\;) (string-null? line)) (loop (read-line)))
-               ((and (equal? (string-ref line 0) #\[)
-                     (equal? (string-ref line (1- (string-length line))) #\])) (set! current-group (substring line 1 (1- (string-length line))))
-                                                                               (loop (read-line)))
-               (else (let ((line-data (string-split line #\=)))
-                       (if (and (equal? (car line-data) key)
-                                (equal? current-group group))
-                           (cadr line-data)
-                           (loop (read-line)))))))
-            #f)))))
 
-(define (read-desktop-file-value desktop-file key)
-  (read-ini-value (path-join "/usr/share/applications" desktop-file) "Desktop Entry" key))
-
-(define (make-desktop-file-choice f) ;; TODO: use system locale for GenericName
-  (let* ((name (read-desktop-file-value f "Name"))
-         (generic-name (read-desktop-file-value f "GenericName"))
-         (generic-name* (if generic-name (string-append " - " generic-name) "")))
-    (string-append name generic-name* " (" f ")")))
-
-(define (run-desktop-file desktop-file file)
-  (let* ((exec-cmd (read-desktop-file-value desktop-file "Exec"))
-         (exec-cmd* (substring-replace exec-cmd "(%f|%F|%u|%U)" file)))
-    (system exec-cmd*)))
-
-(define (select-alternative-with cmd)
-  (λ (file mime-type)
-    (let* ((programs (read-ini-value "/usr/share/applications/mimeinfo.cache" "MIME Cache" mime-type))
-           (desktop-files (if programs
-                                (string-split (string-trim-right programs #\;) #\;)
-                                '()))
-           (alternatives (map make-desktop-file-choice desktop-files))
-           (binaries (system-binary-list))
-           (binaries* (string-join binaries "\n"))
-           (alternatives* (string-join alternatives "\n"))
-           (entries (string-append alternatives* "\n" binaries*))
-           (out (read-sys-out (string-append "printf '" entries "' | " cmd)))
-           (result (if out (string-trim-both out) #f)))
-      (cond
-       ((not result) (display "Bye!") (newline))
-       ((string-suffix? ")" result) (let ((result* (substring result
-                                                              (1+ (string-rindex result #\())
-                                                              (string-rindex result #\)))))
-                                      (run-desktop-file result* file)))
-       (else (system* result file))))))
-
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; main functionality
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(define (open-with name)
-  (λ (file mime)
-    (let ((opener (hashq-ref named-assocs name)))
-      (if (not opener)
-          (begin
-            (display (symbol->string name))
-            (display " not found in associations!")
-            (newline))
-          (opener file #t)))))
-
-(define* (execute-after exit-code file pattern #:optional on-success on-error)
-  (cond
-   ((or (and (number? exit-code)
-             (= exit-code 0))
-        (and (not (number? exit-code))
-             (not (equal? exit-code #f)))) (if on-success
-                                               (run-fn-or-system on-success file pattern)
-                                               #t))
-   (on-error (run-fn-or-system on-error file pattern))
-   (else #f)))
-
-(define* (run-fn-or-system x file pattern #:optional on-success on-error)
-  (define fixed-command (fix-command x file pattern))
-  (cond
-   ((procedure? x) (if cold-run
-                       (begin (display "(call) ") (display x) (newline))
-                       (execute-after (x file current-mime) file pattern on-success on-error)))
-   ((list? x) (if cold-run
-                  (begin (display "(run) ") (display (string-join x " ")) (newline))
-                  (execute-after (apply system* fixed-command) file pattern on-success on-error)))
-   ((string? x) (if cold-run
-                    (begin (display "(run) ") (display x) (newline))
-                    (execute-after (system fixed-command) file pattern on-success on-error)))))
-
-;; TODO: inline this?
-(define (execute program pattern term tmux screen standalone on-success on-error rest file)
-  (let ((command program))
-    (when (and term (not (isatty? (current-output-port))))
-      (set! command (append-command term program standalone)))
-    (when (and tmux (getenv "TMUX"))
-      (set! command (append-command tmux program standalone)))
-    (when (and screen (getenv "STY"))
-      (set! command (append-command screen program standalone)))
-    (let ((runner-program (get-runner-program rest)))
-      (when (and runner-program (not (eqv? runner-program #t)))
-        (set! command runner-program))
-      (if (not (xor runner-program runner-method))
-          (run-fn-or-system command file pattern on-success on-error)
-          (begin
-            (display (string-append "No #:"
-                                    (symbol->string (keyword->symbol runner-method))
-                                    " mode found in matched association."))
-            (newline)
-            #f)))))
-
-(define (pattern-exec pattern file)
-  (define (match-with fn)
-    (or (if current-mime (fn pattern current-mime) #f)
-        (fn pattern file)))
-  (cond
-   ((string? pattern) (match-with string-match))
-   ((regexp? pattern) (match-with regexp-exec))
-   ((list? pattern) (any identity (map (λ (ptrn) (pattern-exec ptrn file)) pattern)))))
-
-(define (compile-pattern pattern)
-  (cond
-   ((string? pattern) (make-regexp pattern))
-   ((regexp? pattern) pattern)
-   ((list? pattern) (map (λ (ptrn) (compile-pattern ptrn)) pattern))))
-
-(define* (assoc #:key
-                name
-                program
-                pattern
-                term
-                tmux
-                screen
-                standalone
-                on-error
-                on-success
-                test
-                on-fail
-                continue-on-error
-                #:allow-other-keys
-                #:rest r)
-  (define x
-    (lambda* (file #:optional pass-test)
-      (set! pattern (compile-pattern pattern))
-      (if (or pass-test (pattern-exec pattern file))
-          (let ((rest (make-paired r))
-                (test-result (not (xor test (if test (run-fn-or-system test file pattern) #f)))))
-            (when (and (not test-result) on-fail)
-              (set! program on-fail))
-            (if (or test-result on-fail)
-                (let ((exit-status (execute program pattern term tmux screen standalone on-success on-error rest file)))
-                  (if (and (not (or (equal? exit-status 0) exit-status)) continue-on-error)
-                      #f
-                      (begin
-                        (set! matched-exit-status exit-status)
-                        #t)))
-                #f))
-          #f)))
-  (set! assoc-list (list-append assoc-list x))
-  (when name
-    (hashq-set! named-assocs name x)))
-
-(define (run-assoc-list file ls)
-  (cond
-   ((null? ls) #f)
-   (((car ls) file) #t)
-   (else
-    (run-assoc-list file (cdr ls)))))
-
-(define (main args)
-  (let* ((option-spec '((mime-type (single-char #\t) (value #f))
-                        (cold-run (single-char #\c) (value #f))
-                        (assoc-file (single-char #\f) (value #t))
-                        (method (single-char #\m) (value #t))
-                        (no-stdin (single-char #\N) (value #f))
-                        (help (single-char #\h) (value #f))))
-         (options (getopt-long args option-spec))
-         (cold-run? (option-ref options 'cold-run #f))
-         (mime? (option-ref options 'mime-type #f))
-         (method? (option-ref options 'method #f))
-         (no-stdin? (option-ref options 'no-stdin #f))
-         (assoc-file? (option-ref options 'mime assoc-file-path))
-         (help? (option-ref options 'help #f)))
-
-    ;; TODO: open multiple files?
-    (define url (let ((u (option-ref options '() #f)))
-                  (if (pair? u)
-                      (car u)
-                      (if no-stdin? #f (read-line)))))
-
-    (cond
-     (mime? (display (mime-type url)) (newline))
-     (help? (display "No help yet :( Please read the README.md file at github."))
-     ((not url) (display "No URI found.") (newline) (exit 1))
-     (else
-      (set! cold-run cold-run?)
-      (set! current-mime (mime-type url))
-      (when method?
-        (set! runner-method (symbol->keyword (string->symbol method?))))
-      (load assoc-file-path)
-      (if (and (not (run-assoc-list url assoc-list)) (not cold-run?))
-          (error (string-append "Nothing found for " url))
-          (exit matched-exit-status))))))
+(define* (assoc #:key pattern name #:allow-other-keys #:rest args)
+  ;; FIXME:
+  (set! jaro/assocs (append jaro/assocs `((#:pattern ,(compile-pattern pattern) ,@args))))
+  (when (specified? name)
+    (hashq-set! jaro/named-assocs name args)))
