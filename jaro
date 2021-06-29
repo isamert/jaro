@@ -131,7 +131,8 @@ Return #f if PROPERTY does not exist."
   "Check if PATTERN matches with the INPUT."
   (cond
    ((regexp? pattern) (regexp-exec pattern input))
-   ((list? pattern) (any identity (map (λ (it) (pattern-matches? it input)) pattern)))))
+   ((list? pattern) (any identity (map (λ (it) (pattern-matches? it input)) pattern)))
+   (else #f)))
 
 (define (compile-pattern pattern)
   "Compile given PATTERN into regexp or list of regexpes."
@@ -194,10 +195,10 @@ It can be either 'gui, 'term, 'tmux, 'screen."
          ((string? program) (system program))
          ((list? program) (apply system* program))))))
 
+;; TODO add coldrun
 (define (run-program program pattern input)
   (cond
    ((procedure? program)
-    ;; TODO: add coldrun
     (program
      input
      (mimetype input)
@@ -207,26 +208,30 @@ It can be either 'gui, 'term, 'tmux, 'screen."
    (else
     (->>
      (hashq-get-handle jaro/named-assocs program)
-     (car)
+     (cdr)
      (assoc->runner)
      ((λ (it) (run-program it pattern input)))))))
 
 (define (run-assoc assoc alternatives input)
   (let* ((pattern (plist-get assoc #:pattern))
-         (result (run-program (assoc->runner assoc) pattern input)))
-    (if result
-        (if-let ((on-success (plist-get assoc #:on-success)))
-                (run-program pattern on-success input)
-                result)
-        (let ((on-error (plist-get assoc #:on-error)))
-          (cond
-           ((program? on-error) (run-program on-error pattern input))
-           ((eq? on-error 'continue)
-            (if (null? alternatives)
-                'jaro/no-matches
-                (run-assoc (car alternatives) (cdr alternatives) input)))
-           ((eq? on-error #f) 'jaro/non-zero-without-on-error)
-           (else 'jaro/run-assoc-failed))))))
+         (success? (run-program (assoc->runner assoc) pattern input))
+         (on-success (plist-get assoc #:on-success))
+         (on-error (plist-get assoc #:on-error)))
+      (cond
+       ((and success? on-success)
+        (run-program pattern on-success input))
+       (success?
+        success?)
+       ((eq? on-error 'continue)
+        (if (null? alternatives)
+            'jaro/no-matches
+            (run-assoc (car alternatives) (cdr alternatives) input)))
+       ((eq? on-error #f)
+        'jaro/non-zero-without-on-error)
+       ((program? on-error)
+        (run-program on-error pattern input))
+       (else
+        'jaro/run-assoc-failed))))
 
 ;;
 ;; Path ops
@@ -289,7 +294,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
      (replace-matches program pattern input)
      (substring-replace "%f" input)
      (substring-replace "%F" (path->abs input))
-     (substring-replace "%u" (path->uri input))))))
+     (substring-replace "%U" (path->uri input))))))
 
 ;;
 ;; Main
