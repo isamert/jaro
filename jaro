@@ -21,6 +21,7 @@ exec guile -e main -s "$0" "$@"
 (define jaro/assocs '())
 (define jaro/named-assocs (make-hash-table))
 (define jaro/cold-run? #t)
+(define jaro/runner-method #f)
 
 ;;
 ;; Extensions
@@ -127,11 +128,18 @@ Return #f if PROPERTY does not exist."
 ;; Pattern
 ;;
 
+(define (run-regexp pattern input mimetype)
+  "Check if given PATTERN matches with INPUT or MIMETYPE."
+  (or (regexp-exec pattern input)
+      (and mimetype (regexp-exec pattern mimetype))))
+
 (define (pattern-matches? pattern input)
   "Check if PATTERN matches with the INPUT."
   (cond
-   ((regexp? pattern) (regexp-exec pattern input))
-   ((list? pattern) (any identity (map (λ (it) (pattern-matches? it input)) pattern)))
+   ((regexp? pattern)
+    (run-regexp pattern input (mimetype input)))
+   ((list? pattern)
+    (any identity (map (λ (it) (pattern-matches? it input)) pattern)))
    (else #f)))
 
 (define (compile-pattern pattern)
@@ -158,12 +166,12 @@ It can be either 'gui, 'term, 'tmux, 'screen."
 
 (define (assoc->runner assoc)
   "Get the running strategy for given ASSOC based on the environment."
-  (let ((default (plist-get assoc #:program)))
-    (case (running-environment)
-      ((tmux) (or (plist-get assoc #:tmux) default))
-      ((screen) (or (plist-get assoc #:screen) default))
-      ((term) (or (plist-get assoc #:term) default))
-      (else default))))
+  (or
+   (case (running-environment)
+     ((tmux) (plist-get assoc #:tmux))
+     ((screen) (plist-get assoc #:screen))
+     ((term) (plist-get assoc #:term)))
+   (plist-get assoc #:program)))
 
 ;;
 ;; Running programs
@@ -212,26 +220,41 @@ It can be either 'gui, 'term, 'tmux, 'screen."
      (assoc->runner)
      ((λ (it) (run-program it pattern input)))))))
 
+(define (run-alternatives input alternatives)
+  (run-assoc (car alternatives) (cdr alternatives) input))
+
+(define (apply-test-rule assoc alternatives input rest)
+  (let ((pattern (plist-get assoc #:pattern)))
+    (if-let ((test (plist-get assoc #:test)))
+      (if (not (run-program test pattern input))
+        (if-let ((on-fail (plist-get assoc #:on-fail)))
+          (run-program on-fail pattern input)
+          (run-alternatives input alternatives))
+        (rest))
+      (rest))))
+
 (define (run-assoc assoc alternatives input)
-  (let* ((pattern (plist-get assoc #:pattern))
-         (success? (run-program (assoc->runner assoc) pattern input))
-         (on-success (plist-get assoc #:on-success))
-         (on-error (plist-get assoc #:on-error)))
-      (cond
-       ((and success? on-success)
-        (run-program pattern on-success input))
-       (success?
-        success?)
-       ((eq? on-error 'continue)
-        (if (null? alternatives)
-            'jaro/no-matches
-            (run-assoc (car alternatives) (cdr alternatives) input)))
-       ((eq? on-error #f)
-        'jaro/non-zero-without-on-error)
-       ((program? on-error)
-        (run-program on-error pattern input))
-       (else
-        'jaro/run-assoc-failed))))
+  (apply-test-rule assoc alternatives input
+    (lambda ()
+      (let* ((pattern (plist-get assoc #:pattern))
+             (success? (run-program (assoc->runner assoc) pattern input))
+             (on-success (plist-get assoc #:on-success))
+             (on-error (plist-get assoc #:on-error)))
+        (cond
+         ((and success? on-success)
+          (run-program on-success pattern input))
+         (success?
+          success?)
+         ((eq? on-error 'continue)
+          (if (null? alternatives)
+              'jaro/no-matches
+              (run-alternatives input alternatives)))
+         ((eq? on-error #f)
+          'jaro/non-zero-without-on-error)
+         ((program? on-error)
+          (run-program on-error pattern input))
+         (else
+          'jaro/run-assoc-failed))))))
 
 ;;
 ;; Path ops
@@ -261,6 +284,22 @@ It can be either 'gui, 'term, 'tmux, 'screen."
    (else (string-append "file://" (path->abs path)))))
 
 ;;
+;; Defaults
+;;
+
+(define home-dir
+  (getenv "HOME"))
+
+(define config-dir
+  (or (getenv "XDG_CONFIG_HOME") (path-join home-dir ".config")))
+
+(define cache-dir
+  (or (getenv "XDG_CACHE_HOME") (path-join home-dir ".cache")))
+
+(define jaro/assoc-file-path
+  (path-join config-dir "associations"))
+
+;;
 ;; Formatter related
 ;;
 
@@ -269,7 +308,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
   (regexp-substitute/global #f sub str 'pre rep 'post))
 
 (define (get-matches program pattern input)
-  (let* ((matches (regexp-exec pattern input)))
+  (let* ((matches (run-regexp pattern input (mimetype input))))
     (map
      (λ (it)
        `(,(string-append "%" (number->string it))
@@ -297,6 +336,24 @@ It can be either 'gui, 'term, 'tmux, 'screen."
      (substring-replace "%U" (path->uri input))))))
 
 ;;
+;; User level functions
+;;
+
+(define (open-with name)
+  (lambda* (file #:rest r)
+    (let ((opener (hashq-ref jaro/named-assocs name)))
+      (cond
+       (opener
+        (opener file #t))
+       (else
+        (display (symbol->string name))
+        (display " not found in associations!")
+        (newline))))))
+
+(define (select-alternative-with method)
+  1)
+
+;;
 ;; Main
 ;;
 
@@ -306,9 +363,43 @@ It can be either 'gui, 'term, 'tmux, 'screen."
   (when (specified? name)
     (hashq-set! jaro/named-assocs name args)))
 
-
 (define (jaro/run input)
   (let* ((candidates (filter (λ (it) (pattern-matches? (plist-get it #:pattern) input)) jaro/assocs)))
     (if (null? candidates)
         'jaro/no-matches
         (run-assoc (car candidates) (cdr candidates) input))))
+
+(define (main args)
+  (let* ((option-spec '((mime-type (single-char #\t) (value #f))
+                        (cold-run (single-char #\c) (value #f))
+                        (assoc-file (single-char #\f) (value #t))
+                        (method (single-char #\m) (value #t))
+                        (no-stdin (single-char #\N) (value #f))
+                        (help (single-char #\h) (value #f))))
+         (options (getopt-long args option-spec))
+         (cold-run? (option-ref options 'cold-run #f))
+         (mime? (option-ref options 'mime-type #f))
+         (method? (option-ref options 'method #f))
+         (no-stdin? (option-ref options 'no-stdin #f))
+         (assoc-file? (option-ref options 'assoc-file jaro/assoc-file-path))
+         (help? (option-ref options 'help #f))
+         (url? (option-ref options '() #f))
+         (url (cond
+               ((pair? url?) (car url?))
+               (no-stdin? #f)
+               (else (read-line)))))
+    (cond
+     (mime?
+      (display (mimetype url))
+      (newline))
+     (help?
+      (display "No help yet :( Please read the README.md file at github."))
+     ((not url)
+      (display "No URI found.")
+      (newline)
+      (exit 1))
+     (else
+      (set! jaro/cold-run? cold-run?)
+      (set! jaro/runner-method (and method? (symbol->keyword (string->symbol method?))))
+      (load assoc-file?)
+      (jaro/run url)))))
