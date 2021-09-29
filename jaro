@@ -76,7 +76,7 @@ exec guile -e main -s "$0" "$@"
          (out (read-string port)))
     (cond
      ((equal? 0 (close-pipe port)) (string-split (string-trim-both out) #\newline))
-     (#t #f))))
+     (else #f))))
 
 ;; https://github.com/alezost/guile-config/blob/master/modules/al/plists.scm
 (define (plist-get plist property)
@@ -308,12 +308,17 @@ It can be either 'gui, 'term, 'tmux, 'screen."
   (regexp-substitute/global #f sub str 'pre rep 'post))
 
 (define (get-matches program pattern input)
-  (let* ((matches (run-regexp pattern input (mimetype input))))
-    (map
-     (λ (it)
-       `(,(string-append "%" (number->string it))
-         . ,(match:substring matches it)))
-     (iota (match:count matches)))))
+  (cond
+   ((regexp? pattern)
+    (let* ((matches (run-regexp pattern input (mimetype input))))
+      (map
+       (λ (it)
+         `(,(string-append "%" (number->string it))
+           . ,(match:substring matches it)))
+       (iota (match:count matches)))))
+   ((list? pattern)
+    (when-let ((matched-pattern (find (lambda (it) (pattern-matches? it input)) pattern)))
+      (get-matches program matched-pattern input)))))
 
 (define (replace-matches program pattern input)
   (if (list? pattern)
@@ -336,6 +341,74 @@ It can be either 'gui, 'term, 'tmux, 'screen."
      (substring-replace "%U" (path->uri input))))))
 
 ;;
+;; INI stuff
+;;
+
+;; FIXME fix
+(define (system-binary-list)
+  (append-map
+   (λ (path)
+     (or (scandir
+          path
+          (λ (file)
+            (let ((abspath (path-join path file)))
+              (and (file-exists? abspath) (not (file-is-directory? abspath))))))
+         '()))
+   (string-split (getenv "PATH") #\:)))
+
+(define (read-ini file)
+  "Read an INI FILE and return a hashtable."
+  (define current-group #f)
+  (define ini-file (open-input-file file))
+  (define ini (make-hash-table))
+  (let loop ()
+    (define line (read-line ini-file))
+    (unless (eof-object? line)
+      (set! line (string-trim-both line))
+      (cond
+       ((or (string-null? line)
+            (equal? (string-ref line 0) #\;))
+        (loop))
+       ((and (equal? (string-ref line 0) #\[)
+             (equal? (string-ref line (1- (string-length line))) #\]))
+        (set! current-group (substring line 1 (1- (string-length line))))
+        (hash-set! ini current-group (make-hash-table))
+        (loop))
+       (else
+        (let* ((line-data (map string-trim-both (string-split line #\=)))
+               (key (car line-data))
+               (val (cadr line-data)))
+          (hash-set! (hash-ref ini current-group (make-hash-table)) key val)
+          (loop))))))
+  (close-input-port ini-file)
+  ini)
+
+(define (read-boolean val)
+  (string= (string-downcase val) "true"))
+
+;; TODO read local values (tr, en, etc.)
+(define (read-app-ini file)
+  (let* ((ini (read-ini file))
+         (desktop-entry (hash-ref ini "Desktop Entry")))
+    (list
+     #:name (hash-ref desktop-entry "Name")
+     #:comment (hash-ref desktop-entry "Comment")
+     #:exec (hash-ref desktop-entry "Exec")
+     #:term (read-boolean (hash-ref desktop-entry "Terminal")))))
+
+;; TODO dont fail if ini file is not found
+(define (select-alternative-with cmd)
+  (λ (file mimetype matches)
+    (let* ((apps-dir "/usr/share/applications/")
+           (ini (read-ini (path-join apps-dir "mimeinfo.cache")))
+           (programs (map
+                      (lambda (it) (read-app-ini (path-join apps-dir it)))
+                      (string-split
+                       (hash-ref (hash-ref ini "MIME Cache") mimetype)
+                       #\;))))
+      programs
+      )))
+;;
 ;; User level functions
 ;;
 
@@ -344,7 +417,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
     (let ((opener (hashq-ref jaro/named-assocs name)))
       (cond
        (opener
-        (opener file #t))
+        (run-assoc opener '() file))
        (else
         (display (symbol->string name))
         (display " not found in associations!")

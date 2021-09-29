@@ -152,7 +152,7 @@
 
 (with-warm-run
   (assoc
-   #:pattern "fn-(\\w+)-test$"
+   #:pattern '("fn-(\\w+)-test$")
    #:program (lambda (_1 _2 matches) (if (string= (cdr (list-ref matches 1)) "sad")
                                     #f 'happy))
    #:on-error (program 'sad))
