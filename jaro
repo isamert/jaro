@@ -2,7 +2,11 @@
 exec guile -e main -s "$0" "$@"
 !#
 
+;; TODO: maybe use (ice-9 optargs) instead of plist implementation
+;; https://www.gnu.org/software/guile/manual/html_node/Coding-With-Keywords.html
+
 (use-modules
+ (ice-9 control)
  (ice-9 regex)
  (ice-9 rdelim)
  (ice-9 popen)
@@ -12,7 +16,8 @@ exec guile -e main -s "$0" "$@"
  (ice-9 poe)
  (ice-9 getopt-long)
  (web uri)
- (srfi srfi-1))
+ (srfi srfi-1)
+ (srfi srfi-2))
 
 ;;
 ;; State
@@ -20,48 +25,10 @@ exec guile -e main -s "$0" "$@"
 
 (define jaro/assocs '())
 (define jaro/named-assocs (make-hash-table))
+(define jaro/env #f)
 (define jaro/cold-run? #t)
 (define jaro/runner-method #f)
-
-;;
-;; Extensions
-;;
-
-;; Source for -> and ->> macros:
-;; https://github.com/joshwalters/guile-pipe
-
-(define-syntax ->
-  (syntax-rules ()
-                ((_) #f)
-                ((_ x) x)
-                ((_ x (f . (f-rest ...))) (f x f-rest ...))
-                ((_ x f) (f x))
-                ((_ x (f . (f-rest ...)) rest ...) (-> (f x f-rest ...) rest ...))
-                ((_ x f rest ...) (-> (f x) rest ...))))
-
-(define-syntax ->>
-  (syntax-rules ()
-                ((_) #f)
-                ((_ x) x)
-                ((_ x (f ...)) (f ... x))
-                ((_ x f) `(f x))
-                ((_ x (f ...) rest ...) (->> (f ... x) rest ...))
-                ((_ x f rest ...) (->> (f x) rest ...))))
-
-(define-syntax if-let
-  (syntax-rules ()
-    ((if-let ((var value) ...)
-             consequent ...)
-     (let ((var value) ...)
-       (if (and var ...)
-           consequent ...)))))
-
-(define-syntax when-let
-  (syntax-rules ()
-    ((when-let (binding)
-               body ...)
-     (if-let (binding)
-             (begin body ...)))))
+(define jaro/debug? #t)
 
 ;;
 ;; Utils
@@ -103,10 +70,7 @@ Return #f if PROPERTY does not exist."
   (let ((uri (string->uri URI)))
     (and
      uri
-     (->>
-      (uri-scheme uri)
-      (symbol->string)
-      (string-append "x-scheme-handler/")))))
+     (string-append "x-scheme-handler/" (symbol->string (uri-scheme uri))))))
 
 (define (mimetype-of-file file)
   "Get the mimetype of FILE using `mimetype' binary."
@@ -158,19 +122,40 @@ It can be either 'gui, 'term, 'tmux, 'screen."
         (set!
          current-environment
          (cond
+          (jaro/env jaro/env)
           ((isatty? (current-output-port)) 'term)
           ((getenv "TMUX") 'tmux)
           ((getenv "STY") 'screen)
+          ((getenv "INSIDE_EMACS") 'emacs)
+          ((getenv "VIMRUNTIME") 'vim)
           (else 'gui))))
       current-environment)))
+
+;; TODO maybe merge running-environment and this function into one
+(define (assoc->env-program assoc)
+  (find
+   (lambda (it)
+     (and-let* ([_ (keyword? it)]
+                [env (symbol->string (keyword->symbol it))]
+                [_ (string-prefix? "env=" env)]
+                [isenv (getenv (substring env 4))])
+       #t))
+   assoc))
 
 (define (assoc->runner assoc)
   "Get the running strategy for given ASSOC based on the environment."
   (or
+   (and jaro/runner-method
+        (plist-get assoc jaro/runner-method))
+   (and-let* ([env-program (assoc->env-program assoc)])
+     (plist-get assoc env-program))
    (case (running-environment)
      ((tmux) (plist-get assoc #:tmux))
      ((screen) (plist-get assoc #:screen))
-     ((term) (plist-get assoc #:term)))
+     ((term) (plist-get assoc #:term))
+     ((emacs) (plist-get assoc #:emacs))
+     ((vim) (plist-get assoc #:vim))
+     (else #f))
    (plist-get assoc #:program)))
 
 ;;
@@ -178,7 +163,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
 ;;
 
 ;; TODO: maybe extend this, so that user can define what happens on
-;; each exit code.  like #:exit-0 "this" #:exit-555 "that"
+;; each exit code.  like #:exit=0 "this" #:exit=555 "that"
 (define (map-exit-code code)
   (case code
     ((0) #t)
@@ -194,9 +179,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
 (define (jaro/system program)
   (if jaro/cold-run?
       (let ((program-to-run (if (list? program) (string-join program " ") program)))
-        (display "(jaro/system) ")
-        (display program-to-run)
-        (newline)
+        (jaro/debug "(jaro/system ~a)" program-to-run)
         program-to-run)
        (map-exit-code
         (cond
@@ -214,47 +197,15 @@ It can be either 'gui, 'term, 'tmux, 'screen."
    ((or (list? program) (string? program))
     (jaro/system (format-program program pattern input)))
    (else
-    (->>
-     (hashq-get-handle jaro/named-assocs program)
-     (cdr)
-     (assoc->runner)
-     ((λ (it) (run-program it pattern input)))))))
+    (run-program
+     (assoc->runner (cdr (hashq-get-handle jaro/named-assocs program)))
+     pattern
+     input))))
 
 (define (run-alternatives input alternatives)
-  (run-assoc (car alternatives) (cdr alternatives) input))
-
-(define (apply-test-rule assoc alternatives input rest)
-  (let ((pattern (plist-get assoc #:pattern)))
-    (if-let ((test (plist-get assoc #:test)))
-      (if (not (run-program test pattern input))
-        (if-let ((on-fail (plist-get assoc #:on-fail)))
-          (run-program on-fail pattern input)
-          (run-alternatives input alternatives))
-        (rest))
-      (rest))))
-
-(define (run-assoc assoc alternatives input)
-  (apply-test-rule assoc alternatives input
-    (lambda ()
-      (let* ((pattern (plist-get assoc #:pattern))
-             (success? (run-program (assoc->runner assoc) pattern input))
-             (on-success (plist-get assoc #:on-success))
-             (on-error (plist-get assoc #:on-error)))
-        (cond
-         ((and success? on-success)
-          (run-program on-success pattern input))
-         (success?
-          success?)
-         ((eq? on-error 'continue)
-          (if (null? alternatives)
-              'jaro/no-matches
-              (run-alternatives input alternatives)))
-         ((eq? on-error #f)
-          'jaro/non-zero-without-on-error)
-         ((program? on-error)
-          (run-program on-error pattern input))
-         (else
-          'jaro/run-assoc-failed))))))
+  (if (null? alternatives)
+      'jaro/no-matches
+  (run-assoc (car alternatives) (cdr alternatives) input)))
 
 ;;
 ;; Path ops
@@ -313,11 +264,11 @@ It can be either 'gui, 'term, 'tmux, 'screen."
     (let* ((matches (run-regexp pattern input (mimetype input))))
       (map
        (λ (it)
-         `(,(string-append "%" (number->string it))
-           . ,(match:substring matches it)))
+         (cons (string-append "%" (number->string it))
+               (match:substring matches it)))
        (iota (match:count matches)))))
    ((list? pattern)
-    (when-let ((matched-pattern (find (lambda (it) (pattern-matches? it input)) pattern)))
+    (and-let* ([matched-pattern (find (lambda (it) (pattern-matches? it input)) pattern)])
       (get-matches program matched-pattern input)))))
 
 (define (replace-matches program pattern input)
@@ -406,11 +357,17 @@ It can be either 'gui, 'term, 'tmux, 'screen."
                       (string-split
                        (hash-ref (hash-ref ini "MIME Cache") mimetype)
                        #\;))))
-      programs
-      )))
+      programs)))
+
 ;;
 ;; User level functions
 ;;
+
+(define* (assoc #:key pattern name #:allow-other-keys #:rest args)
+  ;; FIXME:
+  (set! jaro/assocs (append jaro/assocs `((#:pattern ,(compile-pattern pattern) ,@args))))
+  (when (specified? name)
+    (hashq-set! jaro/named-assocs name args)))
 
 (define (open-with name)
   (lambda* (file #:rest r)
@@ -421,26 +378,70 @@ It can be either 'gui, 'term, 'tmux, 'screen."
        (else
         (display (symbol->string name))
         (display " not found in associations!")
-        (newline))))))
+        (newline)
+        #f)))))
 
-(define (select-alternative-with method)
-  1)
+;;
+;; Jaro utils
+;;
+
+(define* (jaro/debug in #:rest args)
+  (when jaro/debug?
+    (display (apply format #f (string-append ">> [jaro] " in) args))
+    (newline)))
 
 ;;
 ;; Main
 ;;
 
-(define* (assoc #:key pattern name #:allow-other-keys #:rest args)
-  ;; FIXME:
-  (set! jaro/assocs (append jaro/assocs `((#:pattern ,(compile-pattern pattern) ,@args))))
-  (when (specified? name)
-    (hashq-set! jaro/named-assocs name args)))
+(define (run-assoc assoc alternatives input)
+  (let/ec return
+    (let* ([pattern (plist-get assoc #:pattern)]
+           [program (assoc->runner assoc)]
+           [test (plist-get assoc #:test)]
+           [on-fail (plist-get assoc #:on-fail)]
+           [on-success (plist-get assoc #:on-success)]
+           [on-error (plist-get assoc #:on-error)]
+           [continue-on-error (plist-get assoc #:continue-on-error)])
+      (cond
+       [(or (not test)
+            (and test (run-program test pattern input)))
+        (let ((success? (run-program program pattern input)))
+          (jaro/debug "running result is ~a" success?)
+          (cond
+           ((and success? on-success)
+            (run-program on-success pattern input))
+           (success?
+            success?)
+           ((or (eq? on-error 'continue) continue-on-error)
+            (run-alternatives input alternatives))
+           ((eq? on-error #f)
+            'jaro/non-zero-without-on-error)
+           ((program? on-error)
+            (run-program on-error pattern input))
+           (else
+            'jaro/run-assoc-failed)))]
+       [(and test (eqv? on-fail 'continue))
+        (run-alternatives input alternatives)]
+       [(and test (program? on-fail))
+        (run-program on-fail pattern input)]
+       [test
+        (run-alternatives input alternatives)]
+       [else
+        'test/success]))))
 
 (define (jaro/run input)
-  (let* ((candidates (filter (λ (it) (pattern-matches? (plist-get it #:pattern) input)) jaro/assocs)))
+  (let* ((candidates
+          (filter
+           (λ (it) (pattern-matches? (plist-get it #:pattern) input))
+           jaro/assocs)))
     (if (null? candidates)
-        'jaro/no-matches
-        (run-assoc (car candidates) (cdr candidates) input))))
+        (begin
+          (jaro/debug "failed to match anything!")
+          'jaro/no-matches)
+        (begin
+          (jaro/debug "possible candidates are ~a" candidates)
+          (run-assoc (car candidates) (cdr candidates) input)))))
 
 (define (main args)
   (let* ((option-spec '((mime-type (single-char #\t) (value #f))
@@ -461,6 +462,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
                ((pair? url?) (car url?))
                (no-stdin? #f)
                (else (read-line)))))
+    (set! jaro/env (option-ref options 'force-env #f))
     (cond
      (mime?
       (display (mimetype url))
