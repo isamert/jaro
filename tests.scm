@@ -7,11 +7,6 @@
 ;; Some macros
 ;;
 
-(define-syntax program
-  (syntax-rules ()
-    ((program body ...)
-     (lambda (_1 _2 _3) body ...))))
-
 (define-syntax with-cold-run
   (syntax-rules ()
     ((with-cold-run test-name body ...)
@@ -289,6 +284,35 @@
   #:env=VIMRUNTIME (program 'happy))
 
  (test-equal (jaro/run "test-env") 'happy))
+
+(with-cold-run
+ "(program) returns $input properly"
+  (assoc
+   #:pattern "program-test-input"
+   #:program (program
+              (format #f "~a" $input)))
+
+  (test-equal (jaro/run "program-test-input") "program-test-input"))
+
+(with-cold-run
+ "(program) returns submatches properly"
+  (assoc
+   #:pattern "program-test (\\w+) (\\w+) (\\w+)"
+   #:program (program
+              (format #f "~a ~a ~a" $1 $2 $3)))
+
+  (test-equal (jaro/run "program-test happy also happy") "happy also happy"))
+
+
+;; sh, sh-out
+
+(test-equal (sh "echo 'happy'") 0)
+(test-equal (sh "false") 256)
+(test-equal (sh-out "echo 'happy'") "happy\n")
+(test-equal (sh-out "echo 'happy'; echo 'happy'") "happy\nhappy\n")
+(test-equal (sh-out "false") #f)
+(test-equal (sh-out '("echo" "happy")) "happy\n")
+(test-equal (sh-out '("false")) #f)
 
 
 

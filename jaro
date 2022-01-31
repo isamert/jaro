@@ -15,9 +15,20 @@ exec guile -e main -s "$0" "$@"
  (ice-9 pretty-print)
  (ice-9 poe)
  (ice-9 getopt-long)
+ (ice-9 receive)
  (web uri)
  (srfi srfi-1)
  (srfi srfi-2))
+
+
+(define-syntax ->
+  (syntax-rules ()
+                ((_) #f)
+                ((_ x) x)
+                ((_ x (f . (f-rest ...))) (f x f-rest ...))
+                ((_ x f) (f x))
+                ((_ x (f . (f-rest ...)) rest ...) (-> (f x f-rest ...) rest ...))
+                ((_ x f rest ...) (-> (f x) rest ...))))
 
 ;;
 ;; State
@@ -36,14 +47,32 @@ exec guile -e main -s "$0" "$@"
 
 (define specified? (compose not unspecified?))
 
-(define (read-sys-out cmd)
-  (let* ((port (cond
-                ((string? cmd) (open-input-pipe cmd))
-                ((list? cmd) (apply open-pipe* (cons OPEN_READ cmd)))))
-         (out (read-string port)))
-    (cond
-     ((equal? 0 (close-pipe port)) (string-split (string-trim-both out) #\newline))
-     (else #f))))
+(define (sh cmd)
+  (let* ([error-pipe (pipe)]
+         [port (with-error-to-port (cdr error-pipe)
+                 (lambda ()
+                   (cond
+                    ((string? cmd) (open-input-pipe cmd))
+                    ((list? cmd) (apply open-pipe* (cons OPEN_READ cmd))))))]
+         [std-out (read-string port)])
+    (close-port (cdr error-pipe))
+    (values
+     (close-pipe port)
+     std-out
+     (read-string (car error-pipe)))))
+
+(define (sh-out cmd)
+  (receive (exit-code std-out _)
+      (sh cmd)
+    (if (equal? exit-code 0)
+        std-out
+        #f)))
+
+(define (append-to-file file-path string)
+  (let ((output-port (open-file file-path "a")))
+    (display string output-port)
+    (newline output-port)
+    (close output-port)))
 
 ;; https://github.com/alezost/guile-config/blob/master/modules/al/plists.scm
 (define (plist-get plist property)
@@ -62,7 +91,7 @@ Return #f if PROPERTY does not exist."
 
 (define (mimetype-by command)
   "Extract the mimetype from the output of the COMMAND."
-  (let ((mime (read-sys-out command)))
+  (let ((mime (string-split (sh-out command) #\newline)))
     (and mime (car mime))))
 
 (define (mimetype-of-uri URI)
@@ -380,6 +409,28 @@ It can be either 'gui, 'term, 'tmux, 'screen."
         (display " not found in associations!")
         (newline)
         #f)))))
+
+(define-syntax program
+  (lambda (x)
+    (syntax-case x ()
+      ((_ body ...)
+       (with-syntax ((input (datum->syntax x '$input))
+                     (mimetype (datum->syntax x '$mimetype))
+                     (matches (datum->syntax x '$matches))
+                     ($0 (datum->syntax x '$0))
+                     ($1 (datum->syntax x '$1))
+                     ($2 (datum->syntax x '$2))
+                     ($3 (datum->syntax x '$3))
+                     ($4 (datum->syntax x '$4))
+                     ($5 (datum->syntax x '$5)))
+         #`(lambda (input mimetype matches)
+             (let ([$0 (assoc-ref matches "%0")]
+                   [$1 (assoc-ref matches "%1")]
+                   [$2 (assoc-ref matches "%2")]
+                   [$3 (assoc-ref matches "%3")]
+                   [$4 (assoc-ref matches "%4")]
+                   [$5 (assoc-ref matches "%5")])
+               body ...)))))))
 
 ;;
 ;; Jaro utils
