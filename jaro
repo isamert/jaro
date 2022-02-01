@@ -347,7 +347,9 @@ It can be either 'gui, 'term, 'tmux, 'screen."
       (set! line (string-trim-both line))
       (cond
        ((or (string-null? line)
-            (equal? (string-ref line 0) #\;))
+            ;; TODO replace with contains
+            (equal? (string-ref line 0) #\;)
+            (equal? (string-ref line 0) #\#))
         (loop))
        ((and (equal? (string-ref line 0) #\[)
              (equal? (string-ref line (1- (string-length line))) #\]))
@@ -368,25 +370,49 @@ It can be either 'gui, 'term, 'tmux, 'screen."
 
 ;; TODO read local values (tr, en, etc.)
 (define (read-app-ini file)
-  (let* ((ini (read-ini file))
-         (desktop-entry (hash-ref ini "Desktop Entry")))
+  (let* ([ini (read-ini file)]
+         [desktop-entry (hash-ref ini "Desktop Entry")]
+         [name (hash-ref desktop-entry "Name")]
+         [comment (hash-ref desktop-entry "Comment")])
     (list
-     #:name (hash-ref desktop-entry "Name")
-     #:comment (hash-ref desktop-entry "Comment")
+     #:name name
+     #:comment comment
      #:exec (hash-ref desktop-entry "Exec")
-     #:term (read-boolean (hash-ref desktop-entry "Terminal")))))
+     #:term (read-boolean (hash-ref desktop-entry "Terminal"))
+     #:display-name (format #f "~a (~a)"
+                              (string-delete name #\")
+                              (string-delete comment #\")))))
 
 ;; TODO dont fail if ini file is not found
 (define (select-alternative-with cmd)
-  (λ (file mimetype matches)
-    (let* ((apps-dir "/usr/share/applications/")
-           (ini (read-ini (path-join apps-dir "mimeinfo.cache")))
-           (programs (map
-                      (lambda (it) (read-app-ini (path-join apps-dir it)))
-                      (string-split
-                       (hash-ref (hash-ref ini "MIME Cache") mimetype)
-                       #\;))))
-      programs)))
+  (λ (input mimetype matches)
+    (let* ([apps-dir "/usr/share/applications/"]
+           [ini (read-ini (path-join apps-dir "mimeinfo.cache"))]
+           [alternatives-str (hash-ref (hash-ref ini "MIME Cache") mimetype)]
+           [alternative-apps (filter (compose not string-null?) (string-split alternatives-str #\;))]
+           [programs (map (lambda (it) (read-app-ini (path-join apps-dir it))) alternative-apps)]
+           [alternatives (map (λ (it) (plist-get it #:display-name)) programs)]
+           [binaries (system-binary-list)]
+           [binaries* (string-join binaries "\n")]
+           [alternatives* (string-join alternatives "\n")]
+           [entries (string-append alternatives* "\n" binaries*)]
+           [out (sh-out (string-append "printf '" entries "' | " cmd))]
+           [result (if out (string-trim-both out) #f)])
+      (cond
+       [(not result)
+        (display "No matches found!")
+        (newline)
+        (exit 1)]
+       [(string-suffix? ")" result)
+        (let* ([app-exec (plist-get
+                          (find (λ (it) (equal? (plist-get it #:display-name) result)) programs)
+                          #:exec)]
+               [exec (regexp-substitute
+                      #f (string-match "(%f|%F|%u|%U)" app-exec)
+                      'pre input 'post)])
+          (system exec))]
+       [else
+        (system* result input)]))))
 
 ;;
 ;; User level functions
