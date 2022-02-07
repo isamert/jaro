@@ -20,16 +20,6 @@ exec guile -e main -s "$0" "$@"
  (srfi srfi-1)
  (srfi srfi-2))
 
-
-(define-syntax ->
-  (syntax-rules ()
-                ((_) #f)
-                ((_ x) x)
-                ((_ x (f . (f-rest ...))) (f x f-rest ...))
-                ((_ x f) (f x))
-                ((_ x (f . (f-rest ...)) rest ...) (-> (f x f-rest ...) rest ...))
-                ((_ x f rest ...) (-> (f x) rest ...))))
-
 ;;
 ;; State
 ;;
@@ -283,10 +273,6 @@ It can be either 'gui, 'term, 'tmux, 'screen."
 ;; Formatter related
 ;;
 
-(define (substring-replace str sub rep)
-  "Replace all occurrences of SUB in STR with REP"
-  (regexp-substitute/global #f sub str 'pre rep 'post))
-
 (define (get-matches program pattern input)
   (cond
    ((regexp? pattern)
@@ -300,25 +286,23 @@ It can be either 'gui, 'term, 'tmux, 'screen."
     (and-let* ([matched-pattern (find (lambda (it) (pattern-matches? it input)) pattern)])
       (get-matches program matched-pattern input)))))
 
-(define (replace-matches program pattern input)
-  (if (list? pattern)
-      program
-      (fold
-       (λ (it all)
-         (substring-replace all (car it) (cdr it)))
-       program
-       (get-matches program pattern input))))
-
 (define (format-program program pattern input)
   (cond
    ((list? program) (map (λ (it) (format-program it pattern input)) program))
    ((string? program)
-    (->
-     ;; FIXME: (regexp-exec) is called in replace-matches repeadetly, maybe optimize that
-     (replace-matches program pattern input)
-     (substring-replace "%f" input)
-     (substring-replace "%F" (path->abs input))
-     (substring-replace "%U" (path->uri input))))))
+    (let ([matches (get-matches program pattern input)])
+      (regexp-substitute/global
+       #f
+       "%[0-9fFU]"
+       program
+       'pre
+       (lambda (m)
+         (match (match:substring m)
+           ["%f" input]
+           ["%F" (path->abs input)]
+           ["%U" (path->uri input)]
+           [subgroup (or (assoc-ref matches subgroup) subgroup)]))
+       'post)))))
 
 ;;
 ;; INI stuff
@@ -449,7 +433,7 @@ It can be either 'gui, 'term, 'tmux, 'screen."
                      ($3 (datum->syntax x '$3))
                      ($4 (datum->syntax x '$4))
                      ($5 (datum->syntax x '$5)))
-         #`(lambda (input mimetype matches)
+         #'(lambda (input mimetype matches)
              (let ([$0 (assoc-ref matches "%0")]
                    [$1 (assoc-ref matches "%1")]
                    [$2 (assoc-ref matches "%2")]

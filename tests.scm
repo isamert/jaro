@@ -1,7 +1,8 @@
+(eval-when (expand load eval)
+  (load "jaro"))
+
 (use-modules
  (srfi srfi-64))
-
-(load "jaro")
 
 ;;
 ;; Some macros
