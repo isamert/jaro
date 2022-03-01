@@ -132,25 +132,17 @@ Return #f if PROPERTY does not exist."
    ((regexp? pattern) pattern)
    ((list? pattern) (map compile-pattern pattern))))
 
-(define running-environment
-  (let ((current-environment #f))
-    (λ ()
-      "Return the current environment.
-It can be either 'gui, 'term, 'tmux, 'screen."
-      (unless current-environment
-        (set!
-         current-environment
-         (cond
-          (jaro/env jaro/env)
-          ((isatty? (current-output-port)) 'term)
-          ((getenv "TMUX") 'tmux)
-          ((getenv "STY") 'screen)
-          ((getenv "INSIDE_EMACS") 'emacs)
-          ((getenv "VIMRUNTIME") 'vim)
-          (else 'gui))))
-      current-environment)))
+(define (running-environments)
+  (filter
+   identity
+   (list
+    (and jaro/env (symbol->keyword jaro/env))
+    (and (getenv "TMUX") #:tmux)
+    (and (getenv "STY") #:screen)
+    (and (or (getenv "INSIDE_EMACS") (string-contains-ci (getenv "_") "emacs")) #:emacs)
+    (and (getenv "VIMRUNTIME") #:vim)
+    (or (and (isatty? (current-output-port)) #:term) #:program))))
 
-;; TODO maybe merge running-environment and this function into one
 (define (assoc->env-program assoc)
   (find
    (lambda (it)
@@ -168,13 +160,10 @@ It can be either 'gui, 'term, 'tmux, 'screen."
         (plist-get assoc jaro/runner-method))
    (and-let* ([env-program (assoc->env-program assoc)])
      (plist-get assoc env-program))
-   (case (running-environment)
-     ((tmux) (plist-get assoc #:tmux))
-     ((screen) (plist-get assoc #:screen))
-     ((term) (plist-get assoc #:term))
-     ((emacs) (plist-get assoc #:emacs))
-     ((vim) (plist-get assoc #:vim))
-     (else #f))
+   (first
+    (map
+     (lambda (it) (plist-get assoc it))
+     (running-environments)))
    (plist-get assoc #:program)))
 
 ;;

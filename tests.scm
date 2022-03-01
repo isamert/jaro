@@ -301,8 +301,30 @@
    #:pattern "program-test (\\w+) (\\w+) (\\w+)"
    #:program (program
               (format #f "~a ~a ~a" $1 $2 $3)))
+(with-cold-run
+ "selects prioritezed environment when multiple environment matches are found"
+ (setenv "INSIDE_EMACS" "1")
+ (setenv "VIMRUNTIME" "1")
 
-  (test-equal (jaro/run "program-test happy also happy") "happy also happy"))
+ (assoc
+  #:pattern "test-prioritized-env-match$"
+  #:emacs (program 'happy)
+  #:vim (program 'sad))
+
+ (test-equal (jaro/run "test-prioritized-env-match") 'happy))
+
+(with-cold-run
+ "selects supplied environment instead of running ones"
+ (setenv "INSIDE_EMACS" "1")
+ (setenv "VIMRUNTIME" "1")
+ (set! jaro/env 'vim)
+
+ (assoc
+  #:pattern "test-prioritized-env-match$"
+  #:emacs (program 'sad)
+  #:vim (program 'happy))
+
+ (test-equal (jaro/run "test-prioritized-env-match") 'happy))
 
 
 ;; sh, sh-out
