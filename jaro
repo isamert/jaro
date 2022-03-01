@@ -458,40 +458,39 @@ Return #f if PROPERTY does not exist."
 ;;
 
 (define (run-assoc assoc alternatives input)
-  (let/ec return
-    (let* ([pattern (plist-get assoc #:pattern)]
-           [program (assoc->runner assoc)]
-           [test (plist-get assoc #:test)]
-           [on-fail (plist-get assoc #:on-fail)]
-           [on-success (plist-get assoc #:on-success)]
-           [on-error (plist-get assoc #:on-error)]
-           [continue-on-error (plist-get assoc #:continue-on-error)])
-      (cond
-       [(or (not test)
-            (and test (run-program test pattern input)))
-        (let ((success? (run-program program pattern input)))
-          (jaro/debug "running result is ~a" success?)
-          (cond
-           ((and success? on-success)
-            (run-program on-success pattern input))
-           (success?
-            success?)
-           ((or (eq? on-error 'continue) continue-on-error)
-            (run-alternatives input alternatives))
-           ((eq? on-error #f)
-            'jaro/non-zero-without-on-error)
-           ((program? on-error)
-            (run-program on-error pattern input))
-           (else
-            'jaro/run-assoc-failed)))]
-       [(and test (eqv? on-fail 'continue))
-        (run-alternatives input alternatives)]
-       [(and test (program? on-fail))
-        (run-program on-fail pattern input)]
-       [test
-        (run-alternatives input alternatives)]
-       [else
-        'test/success]))))
+  (let* ([pattern (plist-get assoc #:pattern)]
+         [program (assoc->runner assoc)]
+         [test (plist-get assoc #:test)]
+         [on-fail (plist-get assoc #:on-fail)]
+         [on-success (plist-get assoc #:on-success)]
+         [on-error (plist-get assoc #:on-error)]
+         [continue-on-error (plist-get assoc #:continue-on-error)])
+    (cond
+     [(or (not test)
+          (and test (run-program test pattern input)))
+      (let ((success? (run-program program pattern input)))
+        (jaro/debug "running result is ~a" success?)
+        (cond
+         ((and success? on-success)
+          (run-program on-success pattern input))
+         (success?
+          success?)
+         ((or (eq? on-error 'continue) continue-on-error)
+          (run-alternatives input alternatives))
+         ((eq? on-error #f)
+          'jaro/non-zero-without-on-error)
+         ((program? on-error)
+          (run-program on-error pattern input))
+         (else
+          'jaro/run-assoc-failed)))]
+     [(and test (eqv? on-fail 'continue))
+      (run-alternatives input alternatives)]
+     [(and test (program? on-fail))
+      (run-program on-fail pattern input)]
+     [test
+      (run-alternatives input alternatives)]
+     [else
+      'test/success])))
 
 (define (jaro/run input)
   (let* ((candidates
