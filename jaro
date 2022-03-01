@@ -31,6 +31,8 @@ exec guile -e main -s "$0" "$@"
 (define jaro/runner-method #f)
 (define jaro/debug? #t)
 
+(define jaro/emacsclient-binary "emacsclient")
+
 ;;
 ;; Utils
 ;;
@@ -197,18 +199,18 @@ Return #f if PROPERTY does not exist."
 ;; TODO add coldrun
 (define (run-program program pattern input)
   (cond
-   ((procedure? program)
+   [(procedure? program)
     (program
      input
      (mimetype input)
-     (get-matches program pattern input)))
-   ((or (list? program) (string? program))
-    (jaro/system (format-program program pattern input)))
-   (else
+     (get-matches program pattern input))]
+   [(or (list? program) (string? program))
+    (jaro/system (format-program program (get-matches program pattern input) input))]
+   [else
     (run-program
      (assoc->runner (cdr (hashq-get-handle jaro/named-assocs program)))
      pattern
-     input))))
+     input)]))
 
 (define (run-alternatives input alternatives)
   (if (null? alternatives)
@@ -275,23 +277,22 @@ Return #f if PROPERTY does not exist."
     (and-let* ([matched-pattern (find (lambda (it) (pattern-matches? it input)) pattern)])
       (get-matches program matched-pattern input)))))
 
-(define (format-program program pattern input)
+(define (format-program program matches input)
   (cond
-   ((list? program) (map (λ (it) (format-program it pattern input)) program))
+   ((list? program) (map (λ (it) (format-program it matches input)) program))
    ((string? program)
-    (let ([matches (get-matches program pattern input)])
-      (regexp-substitute/global
-       #f
-       "%[0-9fFU]"
-       program
-       'pre
-       (lambda (m)
-         (match (match:substring m)
-           ["%f" input]
-           ["%F" (path->abs input)]
-           ["%U" (path->uri input)]
-           [subgroup (or (assoc-ref matches subgroup) subgroup)]))
-       'post)))))
+    (regexp-substitute/global
+     #f
+     "%[0-9fFU]"
+     program
+     'pre
+     (lambda (m)
+       (match (match:substring m)
+         ["%f" input]
+         ["%F" (path->abs input)]
+         ["%U" (path->uri input)]
+         [subgroup (or (assoc-ref matches subgroup) subgroup)]))
+     'post))))
 
 ;;
 ;; INI stuff
@@ -430,6 +431,18 @@ Return #f if PROPERTY does not exist."
                    [$4 (assoc-ref matches "%4")]
                    [$5 (assoc-ref matches "%5")])
                body ...)))))))
+
+(define-syntax elisp
+  (syntax-rules ()
+    ((_ exp ...)
+     (lambda (input mimetype matches)
+       (jaro/system
+        (list
+         jaro/emacsclient-binary "--eval"
+         (format-program
+          (format #f "~s" (quote (progn exp ...)))
+          matches
+          input)))))))
 
 ;;
 ;; Jaro utils

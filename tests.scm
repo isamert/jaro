@@ -331,6 +331,22 @@
 
  (test-equal (jaro/run "test-prioritized-env-match") 'happy))
 
+(with-cold-run
+ "runs elisp code"
+ (assoc
+  #:pattern "test-elisp-macro$"
+  #:program (elisp (message "hello")))
+
+ (test-equal (jaro/run "test-elisp-macro") "emacsclient --eval (progn (message \"hello\"))"))
+
+(with-cold-run
+ "runs elisp code and injects %f %F %1 %2 %3 ..."
+ (assoc
+  #:pattern "(test)-(elisp)-(macro)-(params)$"
+  #:program (elisp (message "%f is %1-%2-%3-%4")))
+
+ (test-equal (jaro/run "test-elisp-macro-params") "emacsclient --eval (progn (message \"test-elisp-macro-params is test-elisp-macro-params\"))"))
+
 
 ;; sh, sh-out
 
