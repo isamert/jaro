@@ -17,6 +17,7 @@
        (set! jaro/assocs '())
        (set! jaro/named-assocs (make-hash-table))
        (set! jaro/runner-method #f)
+       (set! jaro/env #f)
        body ...))))
 
 (define-syntax with-warm-run
@@ -28,6 +29,7 @@
        (set! jaro/assocs '())
        (set! jaro/named-assocs (make-hash-table))
        (set! jaro/runner-method #f)
+       (set! jaro/env #f)
        body ...))))
 
 ;;
@@ -38,11 +40,11 @@
 
 (with-cold-run
  "basic assoc"
-  (assoc
-   #:pattern ".json$"
-   #:program "json-viewer %f")
+ (assoc
+  #:pattern ".json$"
+  #:program "json-viewer %f")
 
-  (test-equal (jaro/run "~/a.json") "json-viewer ~/a.json"))
+ (test-equal (jaro/run "~/a.json") "json-viewer ~/a.json"))
 
 (with-cold-run
  "assoc with list of patterns."
@@ -54,146 +56,146 @@
 
 (with-warm-run
  "#:program fails"
-  (assoc
-   #:pattern "test-on-error$"
-   #:program "false")
+ (assoc
+  #:pattern "test-on-error$"
+  #:program "false")
 
-  (test-equal (jaro/run "test-on-error") 'jaro/non-zero-without-on-error))
+ (test-equal (jaro/run "test-on-error") 'jaro/non-zero-without-on-error))
 
 (with-warm-run
  "run #:on-error in case of #:program fails"
-  (assoc
-   #:pattern "test-on-error-2$"
-   #:program "false"
-   #:on-error (program 'on-error))
+ (assoc
+  #:pattern "test-on-error-2$"
+  #:program "false"
+  #:on-error (program 'on-error))
 
-  (test-equal (jaro/run "test-on-error-2") 'on-error))
+ (test-equal (jaro/run "test-on-error-2") 'on-error))
 
 (with-warm-run
  "#:program fails and then #:on-error fails"
-  (assoc
-   #:pattern "test-on-error-3$"
-   #:program "false"
-   #:on-error "false")
+ (assoc
+  #:pattern "test-on-error-3$"
+  #:program "false"
+  #:on-error "false")
 
-  (test-equal (jaro/run "test-on-error-3") #f))
+ (test-equal (jaro/run "test-on-error-3") #f))
 
 (with-warm-run
  "#:program fails and #:on-error is 'continue"
-  (assoc
-   #:pattern "test-on-error-4$"
-   #:program "false"
-   #:on-error 'continue)
+ (assoc
+  #:pattern "test-on-error-4$"
+  #:program "false"
+  #:on-error 'continue)
 
-  (assoc
-   #:pattern "test-on-error-4$"
-   #:program "true")
+ (assoc
+  #:pattern "test-on-error-4$"
+  #:program "true")
 
-  (test-equal (jaro/run "test-on-error-4") #t))
+ (test-equal (jaro/run "test-on-error-4") #t))
 
 (with-warm-run
  "#:program fails and #:on-error is 'continue but there are no matches"
-  (assoc
-   #:pattern "test-on-error-5$"
-   #:program "false"
-   #:on-error 'continue)
+ (assoc
+  #:pattern "test-on-error-5$"
+  #:program "false"
+  #:on-error 'continue)
 
-  (assoc
-   #:pattern "test-on-error-5-no-match-on-continue$"
-   #:program "true")
+ (assoc
+  #:pattern "test-on-error-5-no-match-on-continue$"
+  #:program "true")
 
-  (test-equal (jaro/run "test-on-error-5") 'jaro/no-matches))
+ (test-equal (jaro/run "test-on-error-5") 'jaro/no-matches))
 
 (with-warm-run
  "#:program fails and #:on-error calls a named assoc"
-  (assoc
-   #:pattern "test-on-error-6$"
-   #:program "false"
-   #:on-error 'on-error-handler-for-6)
+ (assoc
+  #:pattern "test-on-error-6$"
+  #:program "false"
+  #:on-error 'on-error-handler-for-6)
 
-  (assoc
-   #:name 'on-error-handler-for-6
-   #:program "true")
+ (assoc
+  #:name 'on-error-handler-for-6
+  #:program "true")
 
-  (test-equal (jaro/run "test-on-error-6") #t))
+ (test-equal (jaro/run "test-on-error-6") #t))
 
 (with-cold-run
  "using capture group in a pattern in #:program"
-  (assoc
-   #:pattern "capture-(\\w+)-test$"
-   #:program "%0 %1 %2")
+ (assoc
+  #:pattern "capture-(\\w+)-test$"
+  #:program "%0 %1 %2")
 
-  (test-equal (jaro/run "capture-group-test") "capture-group-test group %2"))
+ (test-equal (jaro/run "capture-group-test") "capture-group-test group %2"))
 
 (with-cold-run
  "replaces %F with full path in #:program"
-  (assoc
-   #:pattern "path-test$"
-   #:program "echo %F")
+ (assoc
+  #:pattern "path-test$"
+  #:program "echo %F")
 
-  (test-equal (jaro/run "full/path-test") (string-append "echo " (getenv "PWD") "/full/path-test")))
+ (test-equal (jaro/run "full/path-test") (string-append "echo " (getenv "PWD") "/full/path-test")))
 
 (with-cold-run
  "replaces %F with full path #:program when given path is already a full path"
-  (assoc
-   #:pattern "path-test$"
-   #:program "echo %F")
+ (assoc
+  #:pattern "path-test$"
+  #:program "echo %F")
 
-  (test-equal (jaro/run "/full/path-test") "echo /full/path-test"))
+ (test-equal (jaro/run "/full/path-test") "echo /full/path-test"))
 
 (with-cold-run
  "replaces %U with URI of given path"
-  (assoc
-   #:pattern "uri-test$"
-   #:program "echo %U")
+ (assoc
+  #:pattern "uri-test$"
+  #:program "echo %U")
 
-  (test-equal (jaro/run "/uri-test") "echo file:///uri-test")
-  (test-equal (jaro/run "https://uri-test") "echo https://uri-test"))
+ (test-equal (jaro/run "/uri-test") "echo file:///uri-test")
+ (test-equal (jaro/run "https://uri-test") "echo https://uri-test"))
 
 (with-cold-run
  "is able to access matching groups in a procedural #:program"
-  (assoc
-   #:pattern "fn-test.(\\w+)$"
-   #:program (lambda (input mimetype matches)
-               (format #f "~a - ~a - ~a" input mimetype matches)))
+ (assoc
+  #:pattern "fn-test.(\\w+)$"
+  #:program (lambda (input mimetype matches)
+              (format #f "~a - ~a - ~a" input mimetype matches)))
 
-  (test-equal (jaro/run "fn-test.mp4") "fn-test.mp4 - video/mp4 - ((%0 . fn-test.mp4) (%1 . mp4))"))
+ (test-equal (jaro/run "fn-test.mp4") "fn-test.mp4 - video/mp4 - ((%0 . fn-test.mp4) (%1 . mp4))"))
 
 (with-warm-run
  "conditionally fails based on given path"
-  (assoc
-   #:pattern '("fn-(\\w+)-test$")
-   #:program (lambda (_1 _2 matches)
-               (if (string= (cdr (list-ref matches 1)) "sad")
-                   #f 'happy))
-   #:on-error (program 'sad))
-  (test-equal (jaro/run "fn-success-test") 'happy)
-  (test-equal (jaro/run "fn-sad-test") 'sad))
+ (assoc
+  #:pattern '("fn-(\\w+)-test$")
+  #:program (lambda (_1 _2 matches)
+              (if (string= (cdr (list-ref matches 1)) "sad")
+                  #f 'happy))
+  #:on-error (program 'sad))
+ (test-equal (jaro/run "fn-success-test") 'happy)
+ (test-equal (jaro/run "fn-sad-test") 'sad))
 
 (with-warm-run
  "handles #:continue-on-error and #:on-fail properly"
-  (assoc
-   #:pattern "test-test-rule$"
-   #:test "false"
-   #:continue-on-error #t)
+ (assoc
+  #:pattern "test-test-rule$"
+  #:test "false"
+  #:continue-on-error #t)
 
-  (assoc
-   #:pattern "test-test-rule$"
-   #:program (program 'alternative))
+ (assoc
+  #:pattern "test-test-rule$"
+  #:program (program 'alternative))
 
-  (assoc
-   #:pattern "test-on-fail-rule$"
-   #:test "false"
-   #:on-fail (program 'on-fail))
+ (assoc
+  #:pattern "test-on-fail-rule$"
+  #:test "false"
+  #:on-fail (program 'on-fail))
 
-  (assoc
-   #:pattern "test-success-rule$"
-   #:test "true"
-   #:program (program 'test-success))
+ (assoc
+  #:pattern "test-success-rule$"
+  #:test "true"
+  #:program (program 'test-success))
 
-  (test-equal (jaro/run "test-test-rule") 'alternative)
-  (test-equal (jaro/run "test-on-fail-rule") 'on-fail)
-  (test-equal (jaro/run "test-success-rule") 'test-success))
+ (test-equal (jaro/run "test-test-rule") 'alternative)
+ (test-equal (jaro/run "test-on-fail-rule") 'on-fail)
+ (test-equal (jaro/run "test-success-rule") 'test-success))
 
 (with-warm-run
  "uses other alternative when #:continue-on-error is t"
@@ -288,19 +290,22 @@
 
 (with-cold-run
  "(program) returns $input properly"
-  (assoc
-   #:pattern "program-test-input"
-   #:program (program
-              (format #f "~a" $input)))
+ (assoc
+  #:pattern "program-test-input"
+  #:program (program
+             (format #f "~a" $input)))
 
-  (test-equal (jaro/run "program-test-input") "program-test-input"))
+ (test-equal (jaro/run "program-test-input") "program-test-input"))
 
 (with-cold-run
  "(program) returns submatches properly"
-  (assoc
-   #:pattern "program-test (\\w+) (\\w+) (\\w+)"
-   #:program (program
-              (format #f "~a ~a ~a" $1 $2 $3)))
+ (assoc
+  #:pattern "program-test (\\w+) (\\w+) (\\w+)"
+  #:program (program
+             (format #f "~a ~a ~a" $1 $2 $3)))
+
+ (test-equal (jaro/run "program-test happy also happy") "happy also happy"))
+
 (with-cold-run
  "selects prioritezed environment when multiple environment matches are found"
  (setenv "INSIDE_EMACS" "1")
