@@ -400,6 +400,15 @@
  (test-equal (jaro/run "list-of-symbols-as-program-test")
    '("echo" "happy" "list-of-symbols-as-program-test")))
 
+(with-cold-run
+ "does not change URLs when absolute path is requested"
+ (assoc
+  #:pattern ".*"
+  #:program '(echo %F))
+
+ (test-equal (jaro/run "https://isamert.net")
+   '("echo" "https://isamert.net")))
+
 
 ;; sh, sh-out
 

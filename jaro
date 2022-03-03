@@ -244,6 +244,7 @@ Return #f if PROPERTY does not exist."
 (define (path->abs path)
   (cond
    ((equal? (string-ref path 0) #\/) path)
+   ((regexp-exec regexp/url path) path)
    (else (path-join (getcwd) path))))
 
 (define (path->uri path)
