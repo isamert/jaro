@@ -364,6 +364,14 @@
 
  (test-equal (jaro/run "test-elisp-macro-params") "emacsclient --eval (progn (message \"test-elisp-macro-params is test-elisp-macro-params\"))"))
 
+(with-cold-run
+ "supports list of symbols"
+ (assoc
+  #:pattern "list-of-symbols-as-program-test$"
+  #:program '(echo happy %f))
+
+ (test-equal (jaro/run "list-of-symbols-as-program-test") "echo happy list-of-symbols-as-program-test"))
+
 
 ;; sh, sh-out
 
