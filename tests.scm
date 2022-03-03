@@ -354,7 +354,8 @@
   #:pattern "test-elisp-macro$"
   #:program (elisp (message "hello")))
 
- (test-equal (jaro/run "test-elisp-macro") "emacsclient --eval (progn (message \"hello\"))"))
+ (test-equal (jaro/run "test-elisp-macro")
+   '("emacsclient" "--eval" "(progn (message \"hello\"))")))
 
 (with-cold-run
  "runs elisp code and injects %f %F %1 %2 %3 ..."
@@ -362,7 +363,8 @@
   #:pattern "(test)-(elisp)-(macro)-(params)$"
   #:program (elisp (message "%f is %1-%2-%3-%4")))
 
- (test-equal (jaro/run "test-elisp-macro-params") "emacsclient --eval (progn (message \"test-elisp-macro-params is test-elisp-macro-params\"))"))
+ (test-equal (jaro/run "test-elisp-macro-params")
+   '("emacsclient" "--eval" "(progn (message \"test-elisp-macro-params is test-elisp-macro-params\"))")))
 
 (with-cold-run
  "supports list of symbols"
@@ -370,7 +372,8 @@
   #:pattern "list-of-symbols-as-program-test$"
   #:program '(echo happy %f))
 
- (test-equal (jaro/run "list-of-symbols-as-program-test") "echo happy list-of-symbols-as-program-test"))
+ (test-equal (jaro/run "list-of-symbols-as-program-test")
+   '("echo" "happy" "list-of-symbols-as-program-test")))
 
 
 ;; sh, sh-out

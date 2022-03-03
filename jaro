@@ -194,16 +194,14 @@ Return #f if PROPERTY does not exist."
       (and (symbol? it) (hashq-get-handle jaro/named-assocs it))))
 
 (define (jaro/system program)
-  (if jaro/cold-run?
-      (let ((program-to-run (if (list? program) (string-join program " ") program)))
-        (jaro/debug "(jaro/system ~a)" program-to-run)
-        program-to-run)
-       (map-exit-code
-        (cond
-         ((string? program) (system program))
-         ((list? program) (apply system* program))))))
+  (jaro/debug "(jaro/system ~a)" program)
+  (cond
+   [jaro/cold-run? program]
+   [else (map-exit-code
+          (cond
+           ((string? program) (system program))
+           ((list? program) (apply system* program))))]))
 
-;; TODO add coldrun
 (define (run-program program pattern input)
   (cond
    [(procedure? program)
@@ -213,11 +211,13 @@ Return #f if PROPERTY does not exist."
      (get-matches program pattern input))]
    [(or (list? program) (string? program))
     (jaro/system (format-program program (get-matches program pattern input) input))]
-   [else
+   [(symbol? program)
     (run-program
      (assoc->runner (cdr (hashq-get-handle jaro/named-assocs program)))
      pattern
-     input)]))
+     input)]
+   [else
+    'jaro/bad-program]))
 
 (define (run-alternatives input alternatives)
   (if (null? alternatives)
