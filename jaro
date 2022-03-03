@@ -161,17 +161,17 @@ Return #f if PROPERTY does not exist."
   (or
    (and-let* ([method jaro/runner-method]
               [runner (plist-get assoc method)])
-     runner)
-   (and-let* ([env-program (assoc->env-program assoc)]
-              [runner (plist-get assoc env-program)])
-     runner)
+     (cons method runner))
+   (and-let* ([method (assoc->env-program assoc)]
+              [runner (plist-get assoc method)])
+     (cons method runner))
    (first
     (filter
      identity
      (map
       (lambda (it) (and-let* ([method it]
                          [runner (plist-get assoc method)])
-                runner))
+                (cons method runner)))
       (running-environments))))))
 
 
@@ -467,7 +467,9 @@ Return #f if PROPERTY does not exist."
 
 (define (run-assoc assoc alternatives input)
   (let* ([pattern (plist-get assoc #:pattern)]
-         [program (assoc->runner assoc)]
+         [program-info (assoc->runner assoc)]
+         [program-env (car (assoc->runner assoc))]
+         [program (cdr (assoc->runner assoc))]
          [test (plist-get assoc #:test)]
          [on-fail (plist-get assoc #:on-fail)]
          [on-success (plist-get assoc #:on-success)]
@@ -475,6 +477,7 @@ Return #f if PROPERTY does not exist."
          [continue-on-error (plist-get assoc #:continue-on-error)])
     (cond
      [(or (not test)
+          (and test (not (equal? program-env #:program)))
           (and test (run-program test pattern input)))
       (let ((success? (run-program program pattern input)))
         (jaro/debug "running result is ~a" success?)

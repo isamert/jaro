@@ -214,6 +214,17 @@
  (test-equal (jaro/run "test-success-rule") 'test-success))
 
 (with-warm-run
+ "skip #:test if something other than #:program is matched"
+ (setenv "INSIDE_EMACS" "1")
+ (assoc
+  #:program (program 'sad)
+  #:emacs (program 'happy)
+  #:pattern "skip-test-test$"
+  #:test "false")
+
+ (test-equal (jaro/run "skip-test-test") 'happy))
+
+(with-warm-run
  "uses other alternative when #:continue-on-error is t"
  (assoc
   #:pattern "test-on-error-continue$"
