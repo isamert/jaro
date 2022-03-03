@@ -175,6 +175,7 @@
 (with-warm-run
  "handles #:continue-on-error and #:on-fail properly"
  (assoc
+  #:program "dummy"
   #:pattern "test-test-rule$"
   #:test "false"
   #:continue-on-error #t)
@@ -184,6 +185,7 @@
   #:program (program 'alternative))
 
  (assoc
+  #:program "dummy"
   #:pattern "test-on-fail-rule$"
   #:test "false"
   #:on-fail (program 'on-fail))
@@ -308,6 +310,7 @@
 
 (with-cold-run
  "selects prioritezed environment when multiple environment matches are found"
+ (setenv "TMUX" "1")
  (setenv "INSIDE_EMACS" "1")
  (setenv "VIMRUNTIME" "1")
 
@@ -317,6 +320,20 @@
   #:vim (program 'sad))
 
  (test-equal (jaro/run "test-prioritized-env-match") 'happy))
+
+(with-cold-run
+ "selects supplied environment instead of running ones"
+ (setenv "INSIDE_EMACS" "1")
+ (setenv "VIMRUNTIME" "1")
+ (set! jaro/env 'vim)
+
+ (assoc
+  #:pattern "test-prioritized-env-match$"
+  #:emacs (program 'sad)
+  #:vim (program 'happy))
+
+ (test-equal (jaro/run "test-prioritized-env-match") 'happy))
+
 
 (with-cold-run
  "selects supplied environment instead of running ones"
