@@ -212,9 +212,9 @@ Return #f if PROPERTY does not exist."
    [(or (list? program) (string? program))
     (jaro/system (format-program program (get-matches program pattern input) input))]
    [(symbol? program)
-    (run-program
-     (assoc->runner (cdr (hashq-get-handle jaro/named-assocs program)))
-     pattern
+    (run-assoc
+     (cdr (hashq-get-handle jaro/named-assocs program))
+     '()
      input)]
    [else
     'jaro/bad-program]))

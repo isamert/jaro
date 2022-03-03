@@ -106,6 +106,20 @@
 
  (test-equal (jaro/run "test-on-error-5") 'jaro/no-matches))
 
+(with-cold-run
+ "matched one redirects to a named assoc"
+ (assoc
+  #:pattern "matched-pattern$"
+  #:program 'named-assoc
+  #:on-error 'continue)
+
+ (assoc
+  #:name 'named-assoc
+  #:pattern "unmatched-pattern"
+  #:program (program 'happy))
+
+ (test-equal (jaro/run "matched-pattern") 'happy))
+
 (with-warm-run
  "#:program fails and #:on-error calls a named assoc"
  (assoc
