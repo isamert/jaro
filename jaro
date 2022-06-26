@@ -83,7 +83,8 @@ Return #f if PROPERTY does not exist."
 
 (define (mimetype-by command)
   "Extract the mimetype from the output of the COMMAND."
-  (let ((mime (string-split (sh-out command) #\newline)))
+  (let* ((result (sh-out command))
+         (mime (and result (string-split result #\newline))))
     (and mime (car mime))))
 
 (define (mimetype-of-uri URI)
