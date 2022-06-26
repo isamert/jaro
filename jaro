@@ -37,6 +37,30 @@ exec guile -e main -s "$0" "$@"
 ;; Utils
 ;;
 
+;; Threading macros are taken from:
+;; https://github.com/joshwalters/guile-pipe
+
+(define-syntax ->
+  (syntax-rules ()
+                ((_) #f)
+                ((_ x) x)
+                ((_ x (f . (f-rest ...))) (f x f-rest ...))
+                ((_ x f) (f x))
+                ((_ x (f . (f-rest ...)) rest ...) (-> (f x f-rest ...) rest ...))
+                ((_ x f rest ...) (-> (f x) rest ...))))
+
+(define-syntax ->>
+  (syntax-rules ()
+                ((_) #f)
+                ((_ x) x)
+                ((_ x (f ...)) (f ... x))
+                ((_ x f) `(f x))
+                ((_ x (f ...) rest ...) (->> (f ... x) rest ...))
+                ((_ x f rest ...) (->> (f x) rest ...))))
+
+(define (flip arg1 fn arg2)
+  (fn arg2 arg1))
+
 (define specified? (compose not unspecified?))
 
 (define (sh cmd)
