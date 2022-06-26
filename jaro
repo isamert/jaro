@@ -332,7 +332,6 @@ Return #f if PROPERTY does not exist."
 ;; INI stuff
 ;;
 
-;; FIXME fix
 (define (system-binary-list)
   (append-map
    (λ (path)
@@ -381,7 +380,7 @@ Return #f if PROPERTY does not exist."
   (let* ([ini (read-ini file)]
          [desktop-entry (hash-ref ini "Desktop Entry")]
          [name (hash-ref desktop-entry "Name")]
-         [comment (hash-ref desktop-entry "Comment")])
+         [comment (or (hash-ref desktop-entry "Comment") "...")])
     (list
      #:name name
      #:comment comment
@@ -391,21 +390,33 @@ Return #f if PROPERTY does not exist."
                               (string-delete name #\")
                               (string-delete comment #\")))))
 
-;; TODO dont fail if ini file is not found
+
+(define (get-alternatives-for apps-dir mimetype)
+  (->
+   (path-join apps-dir "mimeinfo.cache")
+   (read-ini)
+   (hash-ref "MIME Cache")
+   (hash-ref mimetype)
+   (string-split #\;)
+   (flip filter (compose not string-null?))
+   (flip map (lambda (it) (read-app-ini (path-join apps-dir it))))))
+
+(define (get-xdg-application-dirs)
+  (filter (lambda (it) (access? it R_OK))
+   (map
+    (lambda (it) (path-join it "applications"))
+    (string-split
+     (or (getenv "XDG_DATA_DIRS")  "/usr/local/share/:/usr/share/")
+     #\:))))
+
 (define (select-alternative-with cmd)
   (λ (input mimetype matches)
-    (let* ([apps-dir "/usr/share/applications/"]
-           [ini (read-ini (path-join apps-dir "mimeinfo.cache"))]
-           [alternatives-str (hash-ref (hash-ref ini "MIME Cache") mimetype)]
-           [alternative-apps (filter (compose not string-null?) (string-split alternatives-str #\;))]
-           [programs (map (lambda (it) (read-app-ini (path-join apps-dir it))) alternative-apps)]
-           [alternatives (map (λ (it) (plist-get it #:display-name)) programs)]
-           [binaries (system-binary-list)]
-           [binaries* (string-join binaries "\n")]
-           [alternatives* (string-join alternatives "\n")]
-           [entries (string-append alternatives* "\n" binaries*)]
+    (let* ([alternatives (append-map (lambda (it) (get-alternatives-for it mimetype)) (get-xdg-application-dirs))]
+           [binaries* (string-join (map (lambda (it) (string-append it "*"))(system-binary-list)) "\n")]
+           [alternatives* (string-join (map (lambda (it) (plist-get it #:display-name)) alternatives) "\n")]
+           [entries (string-trim (string-append alternatives* "\n" binaries*))]
            [out (sh-out (string-append "printf '" entries "' | " cmd))]
-           [result (if out (string-trim-both out) #f)])
+           [result (and=> out string-trim-both)])
       (cond
        [(not result)
         (display "No matches found!")
@@ -413,14 +424,18 @@ Return #f if PROPERTY does not exist."
         (exit 1)]
        [(string-suffix? ")" result)
         (let* ([app-exec (plist-get
-                          (find (λ (it) (equal? (plist-get it #:display-name) result)) programs)
+                          (find (λ (it) (equal? (plist-get it #:display-name) result)) alternatives)
                           #:exec)]
                [exec (regexp-substitute
                       #f (string-match "(%f|%F|%u|%U)" app-exec)
                       'pre input 'post)])
           (system exec))]
+       [(string-suffix? "*" result)
+        (system* (string-trim-right result #\*) input)]
        [else
-        (system* result input)]))))
+        (display (format "Input ~a is not a command!" result))
+        (newline)
+        (exit 1)]))))
 
 ;;
 ;; User level functions
