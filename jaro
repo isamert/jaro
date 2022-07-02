@@ -107,9 +107,8 @@ Return #f if PROPERTY does not exist."
 
 (define (mimetype-by command)
   "Extract the mimetype from the output of the COMMAND."
-  (let* ((result (sh-out command))
-         (mime (and result (string-split result #\newline))))
-    (and mime (car mime))))
+  (let* ((result (and=> (sh-out command) string-trim-both)))
+    (and result (not (string-null? result)) result)))
 
 (define (mimetype-of-uri URI)
   "Get the mimetype of given URI."
@@ -120,11 +119,11 @@ Return #f if PROPERTY does not exist."
 
 (define (mimetype-of-file file)
   "Get the mimetype of FILE using `mimetype' binary."
-  (let ((mimetype
-         (or
-          (mimetype-by `("mimetype" "--brief" "--dereference" ,file))
-          (mimetype-by `("file" "--brief" "--dereference" "--mime-type" ,file)))))
-    (and (not (string-null? mimetype)) mimetype)))
+  (if (access? file R_OK)
+      (or
+       (mimetype-by `("mimetype" "--brief" "--dereference" ,file))
+       (mimetype-by `("file" "--brief" "--dereference" "--mime-type" ,file)))
+    #f))
 
 (define mimetype
   (pure-funcq
