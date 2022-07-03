@@ -383,7 +383,7 @@ Return #f if PROPERTY does not exist."
      #:name name
      #:comment comment
      #:exec (hash-ref desktop-entry "Exec")
-     #:term (read-boolean (hash-ref desktop-entry "Terminal"))
+     #:term (and=> (hash-ref desktop-entry "Terminal") read-boolean)
      #:display-name (format #f "~a (~a)"
                               (string-delete name #\")
                               (string-delete comment #\")))))
