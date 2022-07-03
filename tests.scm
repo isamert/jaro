@@ -144,10 +144,10 @@
 (with-cold-run
  "replaces %F with full path in #:program"
  (assoc
-  #:pattern "path-test$"
+  #:pattern "full/path-test$"
   #:program "echo %F")
 
- (test-equal (jaro/run "full/path-test") (string-append "echo " (getenv "PWD") "/full/path-test")))
+ (test-equal (jaro/run "full/path-test") (string-append "echo " (getcwd) "/full/path-test")))
 
 (with-cold-run
  "replaces %F with full path #:program when given path is already a full path"
@@ -173,7 +173,7 @@
   #:program (lambda (input mimetype matches)
               (format #f "~a - ~a - ~a" input mimetype matches)))
 
- (test-equal (jaro/run "fn-test.mp4") "fn-test.mp4 - video/mp4 - ((%0 . fn-test.mp4) (%1 . mp4))"))
+ (test-equal (jaro/run "fn-test.mp4") "fn-test.mp4 - #f - ((%0 . fn-test.mp4) (%1 . mp4))"))
 
 (with-warm-run
  "conditionally fails based on given path"
