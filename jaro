@@ -37,26 +37,25 @@ exec guile -e main -s "$0" "$@"
 ;; Utils
 ;;
 
-;; Threading macros are taken from:
-;; https://github.com/joshwalters/guile-pipe
-
 (define-syntax ->
   (syntax-rules ()
-                ((_) #f)
-                ((_ x) x)
-                ((_ x (f . (f-rest ...))) (f x f-rest ...))
-                ((_ x f) (f x))
-                ((_ x (f . (f-rest ...)) rest ...) (-> (f x f-rest ...) rest ...))
-                ((_ x f rest ...) (-> (f x) rest ...))))
+    [(_ x) x]
+    [(_ x (fn args ...) rest ...) (-> (fn x args ...) rest ...)]
+    [(_ x fn rest ...) (-> (fn x) rest ...)]))
+
+(define-syntax -?>
+  (syntax-rules ()
+    [(_ x) x]
+    [(_ x (fn args ...) rest ...) (and-let* ((result (fn x args ...))) (-?> result rest ...))]
+    [(_ x fn rest ...) (and-let* ((result (fn x))) (-?> result rest ...))]))
 
 (define-syntax ->>
-  (syntax-rules ()
-                ((_) #f)
-                ((_ x) x)
-                ((_ x (f ...)) (f ... x))
-                ((_ x f) `(f x))
-                ((_ x (f ...) rest ...) (->> (f ... x) rest ...))
-                ((_ x f rest ...) (->> (f x) rest ...))))
+    (syntax-rules ()
+        [(->> x) x]
+        [(->> x (fn args ...) rest ...) (->> (fn args ... x) rest ...)]
+        [(->> x fn) (fn x)]
+        [(->> x fn rest ...) (->> (fn x) rest ...)]))
+
 
 (define (flip arg1 fn arg2)
   (fn arg2 arg1))
@@ -391,14 +390,16 @@ Return #f if PROPERTY does not exist."
 
 
 (define (get-alternatives-for apps-dir mimetype)
-  (->
-   (path-join apps-dir "mimeinfo.cache")
-   (read-ini)
-   (hash-ref "MIME Cache")
-   (hash-ref mimetype)
-   (string-split #\;)
-   (flip filter (compose not string-null?))
-   (flip map (lambda (it) (read-app-ini (path-join apps-dir it))))))
+  (or
+   (-?>
+    (path-join apps-dir "mimeinfo.cache")
+    (read-ini)
+    (hash-ref "MIME Cache")
+    (hash-ref mimetype)
+    (string-split #\;)
+    (flip filter (compose not string-null?))
+    (flip map (lambda (it) (read-app-ini (path-join apps-dir it)))))
+   '()))
 
 (define (get-xdg-application-dirs)
   (filter (lambda (it) (access? it R_OK))
