@@ -100,6 +100,12 @@ Return #f if PROPERTY does not exist."
          (plist-get rest property)))
     (_ #f)))
 
+(define (string-split-once str pattern)
+  (let ((result (string-split str pattern)))
+    (list
+     (car result)
+     (string-join (list-tail result 1) (format "~a" pattern)))))
+
 ;;
 ;; Mimetype
 ;;
@@ -164,7 +170,7 @@ Return #f if PROPERTY does not exist."
     (and jaro/env (symbol->keyword jaro/env))
     (and (getenv "TMUX") #:tmux)
     (and (getenv "STY") #:screen)
-    (and (or (getenv "INSIDE_EMACS") (string-contains-ci (getenv "_") "emacs")) #:emacs)
+    (and (or (getenv "INSIDE_EMACS") (string-contains-ci (or (getenv "_") "") "emacs")) #:emacs)
     (and (getenv "VIMRUNTIME") #:vim)
     (and (isatty? (current-output-port)) #:term)
     #:program)))
@@ -192,9 +198,10 @@ Return #f if PROPERTY does not exist."
     (filter
      identity
      (map
-      (lambda (it) (and-let* ([method it]
-                         [runner (plist-get assoc method)])
-                (cons method runner)))
+      (lambda (it)
+        (and-let* ([method it]
+                   [runner (plist-get assoc method)])
+          (cons method runner)))
       (running-environments))))))
 
 
@@ -362,7 +369,7 @@ Return #f if PROPERTY does not exist."
         (hash-set! ini current-group (make-hash-table))
         (loop))
        (else
-        (let* ((line-data (map string-trim-both (string-split line #\=)))
+        (let* ((line-data (map string-trim-both (string-split-once line #\=)))
                (key (car line-data))
                (val (cadr line-data)))
           (hash-set! (hash-ref ini current-group (make-hash-table)) key val)
@@ -387,7 +394,6 @@ Return #f if PROPERTY does not exist."
      #:display-name (format #f "~a (~a)"
                               (string-delete name #\")
                               (string-delete comment #\")))))
-
 
 (define (get-alternatives-for apps-dir mimetype)
   (or
@@ -415,6 +421,7 @@ Return #f if PROPERTY does not exist."
            [binaries* (string-join (map (lambda (it) (string-append it "*"))(system-binary-list)) "\n")]
            [alternatives* (string-join (map (lambda (it) (plist-get it #:display-name)) alternatives) "\n")]
            [entries (string-trim (string-append alternatives* "\n" binaries*))]
+           ;; FIXME: directly send to the process instead of using shell pipes
            [out (sh-out (string-append "printf '" entries "' | " cmd))]
            [result (and=> out string-trim-both)])
       (cond
@@ -509,8 +516,8 @@ Return #f if PROPERTY does not exist."
 (define (run-assoc assoc alternatives input)
   (let* ([pattern (plist-get assoc #:pattern)]
          [program-info (assoc->runner assoc)]
-         [program-env (car (assoc->runner assoc))]
-         [program (cdr (assoc->runner assoc))]
+         [program-env (car program-info)]
+         [program (cdr program-info)]
          [test (plist-get assoc #:test)]
          [on-fail (plist-get assoc #:on-fail)]
          [on-success (plist-get assoc #:on-success)]
@@ -518,8 +525,9 @@ Return #f if PROPERTY does not exist."
          [continue-on-error (plist-get assoc #:continue-on-error)])
     (cond
      [(or (not test)
-          (and test (not (equal? program-env #:program)))
-          (and test (run-program test pattern input)))
+          (and test (run-program test pattern input))
+          ;; TODO Why we have the following condition?
+          (and test (not (equal? program-env #:program))))
       (let ((success? (run-program program pattern input)))
         (jaro/debug "running result is ~a" success?)
         (cond
@@ -535,10 +543,13 @@ Return #f if PROPERTY does not exist."
           (run-program on-error pattern input))
          (else
           'jaro/run-assoc-failed)))]
+     ;; Test succeeded but program failed AND on-fail = continue
      [(and test (eqv? on-fail 'continue))
       (run-alternatives input alternatives)]
+     ;; Test succeeded but program failed AND on-fail = procedure
      [(and test (program? on-fail))
       (run-program on-fail pattern input)]
+     ;; Test failed
      [test
       (run-alternatives input alternatives)]
      [else
