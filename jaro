@@ -50,11 +50,11 @@ exec guile -e main -s "$0" "$@"
     [(_ x fn rest ...) (and-let* ((result (fn x))) (-?> result rest ...))]))
 
 (define-syntax ->>
-    (syntax-rules ()
-        [(->> x) x]
-        [(->> x (fn args ...) rest ...) (->> (fn args ... x) rest ...)]
-        [(->> x fn) (fn x)]
-        [(->> x fn rest ...) (->> (fn x) rest ...)]))
+  (syntax-rules ()
+    [(->> x) x]
+    [(->> x (fn args ...) rest ...) (->> (fn args ... x) rest ...)]
+    [(->> x fn) (fn x)]
+    [(->> x fn rest ...) (->> (fn x) rest ...)]))
 
 
 (define (flip arg1 fn arg2)
@@ -104,7 +104,7 @@ Return #f if PROPERTY does not exist."
   (let ((result (string-split str pattern)))
     (list
      (car result)
-     (string-join (list-tail result 1) (format "~a" pattern)))))
+     (string-join (list-tail result 1) (format #f "~a" pattern)))))
 
 ;;
 ;; Mimetype
@@ -128,8 +128,9 @@ Return #f if PROPERTY does not exist."
       (or
        (mimetype-by `("mimetype" "--brief" "--dereference" ,file))
        (mimetype-by `("file" "--brief" "--dereference" "--mime-type" ,file)))
-    #f))
+      #f))
 
+;; FIXME pure-funcq does not work when evaled in geiser
 (define mimetype
   (pure-funcq
    (λ (path)
@@ -252,7 +253,7 @@ Return #f if PROPERTY does not exist."
 (define (run-alternatives input alternatives)
   (if (null? alternatives)
       'jaro/no-matches
-  (run-assoc (car alternatives) (cdr alternatives) input)))
+      (run-assoc (car alternatives) (cdr alternatives) input)))
 
 ;;
 ;; Path ops
@@ -392,8 +393,8 @@ Return #f if PROPERTY does not exist."
      #:exec (hash-ref desktop-entry "Exec")
      #:term (and=> (hash-ref desktop-entry "Terminal") read-boolean)
      #:display-name (format #f "~a (~a)"
-                              (string-delete name #\")
-                              (string-delete comment #\")))))
+                            (string-delete name #\")
+                            (string-delete comment #\")))))
 
 (define (get-alternatives-for apps-dir mimetype)
   (or
@@ -407,40 +408,36 @@ Return #f if PROPERTY does not exist."
     (flip map (lambda (it) (read-app-ini (path-join apps-dir it)))))
    '()))
 
+(define (get-all-alternatives-for mimetype)
+  (append-map
+   (lambda (it) (get-alternatives-for it mimetype))
+   (get-xdg-application-dirs)))
+
 (define (get-xdg-application-dirs)
   (filter (lambda (it) (access? it R_OK))
-   (map
-    (lambda (it) (path-join it "applications"))
-    (string-split
-     (or (getenv "XDG_DATA_DIRS")  "/usr/local/share/:/usr/share/")
-     #\:))))
+          (map
+           (lambda (it) (path-join it "applications"))
+           (string-split
+            (or (getenv "XDG_DATA_DIRS")  "/usr/local/share/:/usr/share/")
+            #\:))))
 
 
 (define (plist-find key item list)
   (find (lambda (it) (equal? (plist-get it key) item)) list))
 
-(define (get-named-alternatives assoc-names)
+(define (get-named-alternative assoc-name)
   "Get definitions of associations from `jaro/named-assocs' with
 #:display-name added."
-  (map
-   (lambda (it)
-     (let ((val (hashq-ref jaro/named-assocs it)))
-       `(#:display-name ,(format "> ~a" (plist-get val #:name)) ,@val)))
-   assoc-names))
+  (let ((val (hashq-ref jaro/named-assocs assoc-name)))
+    `(#:display-name ,(format #f "> ~a" (plist-get val #:name)) ,@val)))
 
-(define* (select-alternative-with cmd #:optional #:key assocs applications binaries)
+;; #:key assocs applications binaries
+(define (select-one-of . args)
   (λ (input mimetype matches)
-    (let* ([named-assocs
-            (get-named-alternatives (or assocs '()))]
-           [named-assocs*
-            (string-join
-             (map (lambda (it) (plist-get it #:display-name)) named-assocs)
-             "\n")]
+    (let* ([named-assocs '()]
            [desktop-files
-            (if applications
-                (append-map
-                 (lambda (it) (get-alternatives-for it mimetype))
-                 (get-xdg-application-dirs))
+            (if (memq #:alternatives args)
+                (get-all-alternatives-for mimetype)
                 '())]
            [desktop-files*
             (string-join
@@ -482,7 +479,7 @@ Return #f if PROPERTY does not exist."
         (system* (string-trim-right result #\*) input)]
        ;; ?
        [else
-        (display (format "Input ~a is not a command!" result))
+        (display (format #f "Input ~a is not a command!" result))
         (newline)
         (exit 1)]))))
 
