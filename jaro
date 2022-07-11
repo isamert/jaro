@@ -25,15 +25,16 @@ exec guile -e main -s "$0" "$@"
 ;; State
 ;;
 
-(define jaro-assocs '())
-(define jaro-named-assocs (make-hash-table))
+(define jaro-bindings '())
+(define jaro-named-bindings (make-hash-table))
 (define jaro-env #f)
 (define jaro-cold-run? #t)
 (define jaro-runner-method #f)
-(define jaro-debug? #t)
+(define jaro-debug? #f)
 
-
+;;
 ;; Config
+;;
 
 (define dynamic-menu-program #f)
 (define emacsclient-binary "emacsclient")
@@ -86,6 +87,13 @@ exec guile -e main -s "$0" "$@"
     (if (equal? exit-code 0)
         std-out
         #f)))
+
+(define (system-type)
+  (let ((typ (string-downcase (utsname:sysname (uname)))))
+    (cond
+     [(string-contains typ "darwin") 'darwin]
+     [(string-contains typ "linux") 'linux]
+     [(string-contains typ "windows") 'windows])))
 
 (define (append-to-file file-path string)
   (let ((output-port (open-file file-path "a")))
@@ -179,7 +187,7 @@ Return #f if PROPERTY does not exist."
     (and (isatty? (current-output-port)) #:term)
     #:program)))
 
-(define (assoc->env-program assoc)
+(define (binding->env-program binding)
   (find
    (λ (it)
      (and-let* ([_ (keyword? it)]
@@ -187,22 +195,22 @@ Return #f if PROPERTY does not exist."
                 [_ (string-prefix? "env=" env)]
                 [isenv (getenv (substring env 4))])
        #t))
-   assoc))
+   binding))
 
-(define (assoc->runner assoc)
-  "Get the running strategy for given ASSOC based on the environment."
+(define (binding->runner binding)
+  "Get the running strategy for given BINDING based on the environment."
   (or
    (and-let* ([method jaro-runner-method]
-              [runner (plist-get assoc method)])
+              [runner (plist-get binding method)])
      (cons method runner))
-   (and-let* ([method (assoc->env-program assoc)]
-              [runner (plist-get assoc method)])
+   (and-let* ([method (binding->env-program binding)]
+              [runner (plist-get binding method)])
      (cons method runner))
    (first
     (filter-map
      (λ (it)
        (and-let* ([method it]
-                  [runner (plist-get assoc method)])
+                  [runner (plist-get binding method)])
          (cons method runner)))
      (running-environments)))))
 
@@ -222,7 +230,7 @@ Return #f if PROPERTY does not exist."
   (or (string? it)
       (procedure? it)
       (and (list? it) (not (null-list? it)))
-      (and (symbol? it) (hashq-get-handle jaro-named-assocs it))))
+      (and (symbol? it) (hashq-get-handle jaro-named-bindings it))))
 
 (define (jaro-system program)
   (jaro-debug "(jaro-system ~a)" program)
@@ -243,8 +251,8 @@ Return #f if PROPERTY does not exist."
    [(or (list? program) (string? program))
     (jaro-system (format-program program (get-matches program pattern input) input))]
    [(symbol? program)
-    (run-assoc
-     (cdr (hashq-get-handle jaro-named-assocs program))
+    (run-binding
+     (cdr (hashq-get-handle jaro-named-bindings program))
      '()
      input)]
    [else
@@ -253,7 +261,7 @@ Return #f if PROPERTY does not exist."
 (define (run-alternatives input alternatives)
   (if (null? alternatives)
       'jaro-no-matches
-      (run-assoc (car alternatives) (cdr alternatives) input)))
+      (run-binding (car alternatives) (cdr alternatives) input)))
 
 ;;
 ;; Path ops
@@ -296,7 +304,7 @@ Return #f if PROPERTY does not exist."
 (define cache-dir
   (or (getenv "XDG_CACHE_HOME") (path-join home-dir ".cache")))
 
-(define jaro-assoc-file-path
+(define jaro-binding-file-path
   (path-join config-dir "associations"))
 
 ;;
@@ -408,6 +416,7 @@ Return #f if PROPERTY does not exist."
     (flip map (λ (it) (read-app-ini (path-join apps-dir it)))))
    '()))
 
+;; TODO somehow support macos? seems quite hard tho
 (define (get-all-alternatives-for mimetype)
   (append-map
    (λ (it) (get-alternatives-for it mimetype))
@@ -426,16 +435,20 @@ Return #f if PROPERTY does not exist."
 (define (plist-find key item list)
   (find (λ (it) (equal? (plist-get it key) item)) list))
 
-(define (get-named-alternative assoc-name)
-  "Get definitions of associations from `jaro-named-assocs' with
+(define (get-named-alternative binding-name)
+  "Get definitions of bindings from `jaro-named-bindings' with
 #:display-name added."
-  (let ((val (hashq-ref jaro-named-assocs assoc-name)))
-    `(#:display-name ,(format #f "> ~a" (plist-get val #:name)) ,@val)))
+  (let* ((val (hashq-ref jaro-named-bindings binding-name))
+         (comment (plist-get val #:comment)))
+    `(#:display-name
+      ,(format #f "> ~a~a"
+               (plist-get val #:name)
+               (if comment (format #f " (~a)" comment) ""))
+      ,@val)))
 
-;; #:key assocs applications binaries
 (define (select-one-of . args)
   (λ (input mimetype matches)
-    (let* ([named-assocs '()]
+    (let* ([named-bindings '()]
            [desktop-files
             (if (memq #:alternatives args)
                 (get-all-alternatives-for mimetype)
@@ -464,13 +477,14 @@ Return #f if PROPERTY does not exist."
                   [(#:alternatives) desktop-files*]
                   [(#:binaries) binaries*]
                   [else (let ((alt (get-named-alternative it)))
-                          (append! named-assocs alt)
+                          (set! named-bindings (append! named-bindings (list alt)))
                           (plist-get alt #:display-name))]))
               args)
              (string-join "\n")
              (string-trim-both))]
-           ;; FIXME: directly send to the process instead of using shell pipes
            [out
+            ;; FIXME: directly send to the process instead of using shell pipes
+            ;; https://debbugs.gnu.org/cgi/bugreport.cgi?bug=52835
             (sh-out (string-append "printf '" entries "' | " dynamic-menu-program))]
            [result
             (and=> out string-trim-both)])
@@ -479,9 +493,9 @@ Return #f if PROPERTY does not exist."
         (display "No matches found!")
         (newline)
         (exit 1)]
-       ;; Named assoc
+       ;; Named binding
        [(string-prefix? ">" result)
-        (run-assoc (plist-find #:display-name result named-assocs) '() input)]
+        (run-binding (plist-find #:display-name result named-bindings) '() input)]
        ;; Desktop file
        [(string-suffix? ")" result)
         (let* ([app-exec
@@ -506,21 +520,20 @@ Return #f if PROPERTY does not exist."
 ;; User level functions
 ;;
 
-(define* (assoc #:key pattern name #:allow-other-keys #:rest args)
-  ;; FIXME:
-  (set! jaro-assocs (append jaro-assocs `((#:pattern ,(compile-pattern pattern) ,@args))))
+(define* (bind #:key pattern name #:allow-other-keys #:rest args)
+  (set! jaro-bindings (append! jaro-bindings `((#:pattern ,(compile-pattern pattern) ,@args))))
   (when (specified? name)
-    (hashq-set! jaro-named-assocs name args)))
+    (hashq-set! jaro-named-bindings name args)))
 
 (define (open-with name)
   (λ (file . r)
-    (let ((opener (hashq-ref jaro-named-assocs name)))
+    (let ((opener (hashq-ref jaro-named-bindings name)))
       (cond
        (opener
-        (run-assoc opener '() file))
+        (run-binding opener '() file))
        (else
         (display (symbol->string name))
-        (display " not found in associations!")
+        (display " not found in bindings!")
         (newline)
         #f)))))
 
@@ -571,20 +584,21 @@ Return #f if PROPERTY does not exist."
 ;; Main
 ;;
 
-(define (run-assoc assoc alternatives input)
-  (let* ([pattern (plist-get assoc #:pattern)]
-         [program-info (assoc->runner assoc)]
+(define (run-binding binding alternatives input)
+  (let* ([pattern (plist-get binding #:pattern)]
+         [program-info (binding->runner binding)]
          [program-env (car program-info)]
          [program (cdr program-info)]
-         [test (plist-get assoc #:test)]
-         [on-fail (plist-get assoc #:on-fail)]
-         [on-success (plist-get assoc #:on-success)]
-         [on-error (plist-get assoc #:on-error)]
-         [continue-on-error (plist-get assoc #:continue-on-error)])
+         [test (plist-get binding #:test)]
+         [on-fail (plist-get binding #:on-fail)]
+         [on-success (plist-get binding #:on-success)]
+         [on-error (plist-get binding #:on-error)]
+         [continue-on-error (plist-get binding #:continue-on-error)])
+    (jaro-debug "running ~a with input" binding input)
     (cond
      [(or (not test)
           (and test (run-program test pattern input))
-          ;; TODO Why we have the following condition?
+          ;; TODO Why?
           (and test (not (equal? program-env #:program))))
       (let ((success? (run-program program pattern input)))
         (jaro-debug "running result is ~a" success?)
@@ -600,36 +614,36 @@ Return #f if PROPERTY does not exist."
          ((program? on-error)
           (run-program on-error pattern input))
          (else
-          'jaro-run-assoc-failed)))]
-     ;; Test succeeded but program failed AND on-fail = continue
-     [(and test (eqv? on-fail 'continue))
-      (run-alternatives input alternatives)]
-     ;; Test succeeded but program failed AND on-fail = procedure
+          'jaro-run-binding-failed)))]
      [(and test (program? on-fail))
+      (jaro-debug "test failed, running on-fail")
       (run-program on-fail pattern input)]
-     ;; Test failed
+     [(and test (eqv? on-fail 'stop))
+      (jaro-debug "test failed, on-fail stops the execution")
+      'jaro-match-failed]
      [test
+      (jaro-debug "test failed, running on-fail")
       (run-alternatives input alternatives)]
      [else
-      'test/success])))
+      'jaro-unknown])))
 
 (define (jaro-run input)
   (let* ((candidates
           (filter
            (λ (it) (pattern-matches? (plist-get it #:pattern) input))
-           jaro-assocs)))
+           jaro-bindings)))
     (if (null? candidates)
         (begin
           (jaro-debug "failed to match anything!")
           'jaro-no-matches)
         (begin
           (jaro-debug "possible candidates are ~a" candidates)
-          (run-assoc (car candidates) (cdr candidates) input)))))
+          (run-binding (car candidates) (cdr candidates) input)))))
 
 (define (main args)
   (let* ((option-spec '((mime-type (single-char #\t) (value #f))
                         (cold-run (single-char #\c) (value #f))
-                        (assoc-file (single-char #\f) (value #t))
+                        (binding-file (single-char #\f) (value #t))
                         (method (single-char #\m) (value #t))
                         (no-stdin (single-char #\N) (value #f))
                         (help (single-char #\h) (value #f))))
@@ -638,7 +652,7 @@ Return #f if PROPERTY does not exist."
          (mime? (option-ref options 'mime-type #f))
          (method? (option-ref options 'method #f))
          (no-stdin? (option-ref options 'no-stdin #f))
-         (assoc-file? (option-ref options 'assoc-file jaro-assoc-file-path))
+         (binding-file? (option-ref options 'binding-file jaro-binding-file-path))
          (help? (option-ref options 'help #f))
          (url? (option-ref options '() #f))
          (url (cond
@@ -659,5 +673,5 @@ Return #f if PROPERTY does not exist."
      (else
       (set! jaro-cold-run? cold-run?)
       (set! jaro-runner-method (and method? (symbol->keyword (string->symbol method?))))
-      (load assoc-file?)
+      (load binding-file?)
       (jaro-run url)))))
