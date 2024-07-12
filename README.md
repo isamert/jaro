@@ -19,8 +19,6 @@ echo "/path/to/file" | jaro
 
 You can disable stdin feature with passing `--no-stdin` parameter.
 
-Please see [Configuration](#configuration) down below.
-
 General usage:
 
 ```bash
@@ -83,7 +81,11 @@ stat $(which xdg-open)
 
 jaro, by default, looks for the file `~/.config/associations` and loads it. This file contains multiple `(bind ...)` definitions and (optionally) some arbitrary Guile Scheme code. jaro will try to match the given URI with each binding in order. I'll go trough some examples that shows you binding files/URIs with programs.
 
-Here is a pretty basic rule for associating all image types with `sxiv`:
+Only hard dependency is Guile. For enhanced mimetype detection, install `mimetype`, otherwise _jaro_ will fallback to standard `file` utility for mimetype detection, which is far more inferior.
+
+# Configuration
+
+_jaro_ looks for the file `~/.config/associations` and loads it. This file contains multiple `(assoc ...)` definitions and arbitrary _Scheme_ code. `jaro` will try to match the given URI with each association in order. I'll go trough some examples that shows you associating files/uris with programs.
 
 ```scheme
 (bind
