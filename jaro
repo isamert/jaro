@@ -322,11 +322,12 @@ Return #f if PROPERTY does not exist."
    ((string? program)
     (regexp-substitute/global
      #f
-     "%[0-9fFU]"
+     "%[0-9fFUd]"
      program
      'pre
      (λ (m)
        (match (match:substring m)
+         ["%d" (dirname (path->abs input))]
          ["%f" input]
          ["%F" (path->abs input)]
          ["%U" (path->uri input)]
