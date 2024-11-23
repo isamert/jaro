@@ -21,9 +21,7 @@ exec guile -e main -s "$0" "$@"
  (srfi srfi-2)
  (srfi srfi-26))
 
-;;
-;; State
-;;
+;;; State
 
 (define jaro-bindings '())
 (define jaro-named-bindings (make-hash-table))
@@ -32,16 +30,12 @@ exec guile -e main -s "$0" "$@"
 (define jaro-runner-method #f)
 (define jaro-debug? #f)
 
-;;
-;; Config
-;;
+;;; Config
 
 (define dynamic-menu-program #f)
 (define emacsclient-binary "emacsclient")
 
-;;
-;; Utils
-;;
+;;; Utils
 
 (define-syntax ->
   (syntax-rules ()
@@ -127,9 +121,7 @@ Return #f if PROPERTY does not exist."
      (car result)
      (string-join (list-tail result 1) (format #f "~a" pattern)))))
 
-;;
-;; Mimetype
-;;
+;;; Mimetype
 
 (define (mimetype-by command)
   "Extract the mimetype from the output of the COMMAND."
@@ -159,9 +151,7 @@ Return #f if PROPERTY does not exist."
       (mimetype-of-uri path)
       (mimetype-of-file path)))))
 
-;;
-;; Pattern
-;;
+;;; Pattern
 
 (define (run-regexp pattern input mimetype)
   "Check if given PATTERN matches with INPUT or MIMETYPE."
@@ -223,9 +213,7 @@ Return #f if PROPERTY does not exist."
          (cons method runner)))
      (running-environments)))))
 
-;;
-;; Running programs
-;;
+;;; Running programs
 
 ;; TODO: maybe extend this, so that user can define what happens on
 ;; each exit code.  like #:exit=0 "this" #:exit=555 "that"
@@ -272,9 +260,7 @@ Return #f if PROPERTY does not exist."
       'jaro-no-matches
       (run-binding (car alternatives) (cdr alternatives) input)))
 
-;;
-;; Path ops
-;;
+;;; Path ops
 
 (define regexp/url (make-regexp "^[a-zA-Z]+:"))
 
@@ -300,9 +286,7 @@ Return #f if PROPERTY does not exist."
    ((regexp-exec regexp/url path) path)
    (else (string-append "file://" (path->abs path)))))
 
-;;
-;; Defaults
-;;
+;;; Defaults
 
 (define home-dir
   (getenv "HOME"))
@@ -316,9 +300,7 @@ Return #f if PROPERTY does not exist."
 (define jaro-binding-file-path
   (path-join config-dir "associations"))
 
-;;
-;; Formatter related
-;;
+;;; Formatter related
 
 (define (get-matches program pattern input)
   (cond
@@ -351,9 +333,7 @@ Return #f if PROPERTY does not exist."
          [subgroup (or (assoc-ref matches subgroup) subgroup)]))
      'post))))
 
-;;
-;; INI stuff
-;;
+;;; INI stuff
 
 (define (system-binary-list)
   (append-map
@@ -527,9 +507,7 @@ Return #f if PROPERTY does not exist."
         (newline)
         (exit 1)]))))
 
-;;
-;; User level functions
-;;
+;;; User level functions
 
 (define* (bind #:key pattern name #:allow-other-keys #:rest args)
   (set! jaro-bindings (append! jaro-bindings `((#:pattern ,(compile-pattern pattern) ,@args))))
@@ -582,18 +560,14 @@ Return #f if PROPERTY does not exist."
           matches
           input)))))))
 
-;;
-;; Jaro utils
-;;
+;;; Jaro utils
 
 (define* (jaro-debug in #:rest args)
   (when jaro-debug?
     (display (apply format #f (string-append ">> [jaro] " in) args))
     (newline)))
 
-;;
-;; Main
-;;
+;;; Main
 
 (define (run-binding binding alternatives input)
   (let* ([pattern (plist-get binding #:pattern)]
