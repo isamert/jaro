@@ -337,15 +337,16 @@ Return #f if PROPERTY does not exist."
 ;;; INI stuff
 
 (define (system-binary-list)
-  (append-map
-   (λ (path)
-     (or (scandir
-          path
-          (λ (file)
-            (let ((abspath (path-join path file)))
-              (and (file-exists? abspath) (not (file-is-directory? abspath))))))
-         '()))
-   (string-split (getenv "PATH") #\:)))
+  (delete-duplicates!
+   (append-map
+    (λ (path)
+      (or (scandir
+           path
+           (λ (file)
+             (let ((abspath (path-join path file)))
+               (and (file-exists? abspath) (not (file-is-directory? abspath))))))
+          '()))
+    (string-split (getenv "PATH") #\:))))
 
 (define (read-ini file)
   "Read an INI FILE and return a hashtable."
