@@ -415,12 +415,46 @@ Return #f if PROPERTY does not exist."
      (or (getenv "XDG_DATA_DIRS")  "/usr/local/share/:/usr/share/")
      #\:))))
 
-(define (select-alternative-with cmd)
+
+(define (plist-find key item list)
+  (find (lambda (it) (equal? (plist-get it key) item)) list))
+
+(define (get-named-alternatives assoc-names)
+  "Get definitions of associations from `jaro/named-assocs' with
+#:display-name added."
+  (map
+   (lambda (it)
+     (let ((val (hashq-ref jaro/named-assocs it)))
+       `(#:display-name ,(format "> ~a" (plist-get val #:name)) ,@val)))
+   assoc-names))
+
+(define* (select-alternative-with cmd #:optional #:key assocs applications binaries)
   (λ (input mimetype matches)
-    (let* ([alternatives (append-map (lambda (it) (get-alternatives-for it mimetype)) (get-xdg-application-dirs))]
-           [binaries* (string-join (map (lambda (it) (string-append it "*"))(system-binary-list)) "\n")]
-           [alternatives* (string-join (map (lambda (it) (plist-get it #:display-name)) alternatives) "\n")]
-           [entries (string-trim (string-append alternatives* "\n" binaries*))]
+    (let* ([named-assocs
+            (get-named-alternatives (or assocs '()))]
+           [named-assocs*
+            (string-join
+             (map (lambda (it) (plist-get it #:display-name)) named-assocs)
+             "\n")]
+           [desktop-files
+            (if applications
+                (append-map
+                 (lambda (it) (get-alternatives-for it mimetype))
+                 (get-xdg-application-dirs))
+                '())]
+           [desktop-files*
+            (string-join
+             (map
+              (lambda (it) (plist-get it #:display-name))
+              desktop-files)
+             "\n")]
+           [binaries*
+            (string-join
+             (map
+              (lambda (it) (string-append it "*"))
+              (if binaries (system-binary-list) '()))
+             "\n")]
+           [entries (string-trim (string-append named-assocs* "\n" desktop-files* "\n" binaries*))]
            ;; FIXME: directly send to the process instead of using shell pipes
            [out (sh-out (string-append "printf '" entries "' | " cmd))]
            [result (and=> out string-trim-both)])
@@ -429,16 +463,24 @@ Return #f if PROPERTY does not exist."
         (display "No matches found!")
         (newline)
         (exit 1)]
+       ;; Named assoc
+       [(string-prefix? ">" result)
+        (run-assoc (plist-find #:display-name result named-assocs) '() input)]
+       ;; Desktop file
        [(string-suffix? ")" result)
-        (let* ([app-exec (plist-get
-                          (find (λ (it) (equal? (plist-get it #:display-name) result)) alternatives)
-                          #:exec)]
-               [exec (regexp-substitute
-                      #f (string-match "(%f|%F|%u|%U)" app-exec)
-                      'pre input 'post)])
+        (let* ([app-exec
+                (plist-get
+                 (plist-find #:display-name result desktop-files)
+                 #:exec)]
+               [exec
+                (regexp-substitute
+                 #f (string-match "(%f|%F|%u|%U)" app-exec)
+                 'pre input 'post)])
           (system exec))]
+       ;; Binary
        [(string-suffix? "*" result)
         (system* (string-trim-right result #\*) input)]
+       ;; ?
        [else
         (display (format "Input ~a is not a command!" result))
         (newline)
