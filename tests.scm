@@ -14,8 +14,8 @@
      (begin
        (format #t ">>>>> Running ~a <<<<<\n" test-name)
        (set! jaro-cold-run? #t)
-       (set! jaro-assocs '())
-       (set! jaro-named-assocs (make-hash-table))
+       (set! jaro-bindings '())
+       (set! jaro-named-bindings (make-hash-table))
        (set! jaro-runner-method #f)
        (set! jaro-env #f)
        body ...))))
@@ -26,8 +26,8 @@
      (begin
        (format #t ">>>>> Running ~a <<<<<\n" test-name)
        (set! jaro-cold-run? #f)
-       (set! jaro-assocs '())
-       (set! jaro-named-assocs (make-hash-table))
+       (set! jaro-bindings '())
+       (set! jaro-named-bindings (make-hash-table))
        (set! jaro-runner-method #f)
        (set! jaro-env #f)
        body ...))))
@@ -39,16 +39,16 @@
 (test-begin "all-tests")
 
 (with-cold-run
- "basic assoc"
- (assoc
+ "basic binding"
+ (bind
   #:pattern ".json$"
   #:program "json-viewer %f")
 
  (test-equal (jaro-run "~/a.json") "json-viewer ~/a.json"))
 
 (with-cold-run
- "assoc with list of patterns."
- (assoc
+ "binding with list of patterns."
+ (bind
   #:pattern '(".js$" ".json$" ".yaml$")
   #:program "json-viewer %f")
 
@@ -56,7 +56,7 @@
 
 (with-warm-run
  "#:program fails"
- (assoc
+ (bind
   #:pattern "test-on-error$"
   #:program "false")
 
@@ -64,7 +64,7 @@
 
 (with-warm-run
  "run #:on-error in case of #:program fails"
- (assoc
+ (bind
   #:pattern "test-on-error-2$"
   #:program "false"
   #:on-error (program 'on-error))
@@ -73,7 +73,7 @@
 
 (with-warm-run
  "#:program fails and then #:on-error fails"
- (assoc
+ (bind
   #:pattern "test-on-error-3$"
   #:program "false"
   #:on-error "false")
@@ -82,12 +82,12 @@
 
 (with-warm-run
  "#:program fails and #:on-error is 'continue"
- (assoc
+ (bind
   #:pattern "test-on-error-4$"
   #:program "false"
   #:on-error 'continue)
 
- (assoc
+ (bind
   #:pattern "test-on-error-4$"
   #:program "true")
 
@@ -95,39 +95,39 @@
 
 (with-warm-run
  "#:program fails and #:on-error is 'continue but there are no matches"
- (assoc
+ (bind
   #:pattern "test-on-error-5$"
   #:program "false"
   #:on-error 'continue)
 
- (assoc
+ (bind
   #:pattern "test-on-error-5-no-match-on-continue$"
   #:program "true")
 
  (test-equal (jaro-run "test-on-error-5") 'jaro-no-matches))
 
 (with-cold-run
- "matched one redirects to a named assoc"
- (assoc
+ "matched one redirects to a named binding"
+ (bind
   #:pattern "matched-pattern$"
-  #:program 'named-assoc
+  #:program 'named-binding
   #:on-error 'continue)
 
- (assoc
-  #:name 'named-assoc
+ (bind
+  #:name 'named-binding
   #:pattern "unmatched-pattern"
   #:program (program 'happy))
 
  (test-equal (jaro-run "matched-pattern") 'happy))
 
 (with-warm-run
- "#:program fails and #:on-error calls a named assoc"
- (assoc
+ "#:program fails and #:on-error calls a named binding"
+ (bind
   #:pattern "test-on-error-6$"
   #:program "false"
   #:on-error 'on-error-handler-for-6)
 
- (assoc
+ (bind
   #:name 'on-error-handler-for-6
   #:program "true")
 
@@ -135,7 +135,7 @@
 
 (with-cold-run
  "using capture group in a pattern in #:program"
- (assoc
+ (bind
   #:pattern "capture-(\\w+)-test$"
   #:program "%0 %1 %2")
 
@@ -143,7 +143,7 @@
 
 (with-cold-run
  "replaces %F with full path in #:program"
- (assoc
+ (bind
   #:pattern "full/path-test$"
   #:program "echo %F")
 
@@ -151,7 +151,7 @@
 
 (with-cold-run
  "replaces %F with full path #:program when given path is already a full path"
- (assoc
+ (bind
   #:pattern "path-test$"
   #:program "echo %F")
 
@@ -159,7 +159,7 @@
 
 (with-cold-run
  "replaces %U with URI of given path"
- (assoc
+ (bind
   #:pattern "uri-test$"
   #:program "echo %U")
 
@@ -168,7 +168,7 @@
 
 (with-cold-run
  "is able to access matching groups in a procedural #:program"
- (assoc
+ (bind
   #:pattern "fn-test.(\\w+)$"
   #:program (lambda (input mimetype matches)
               (format #f "~a - ~a - ~a" input mimetype matches)))
@@ -177,7 +177,7 @@
 
 (with-warm-run
  "conditionally fails based on given path"
- (assoc
+ (bind
   #:pattern '("fn-(\\w+)-test$")
   #:program (lambda (_1 _2 matches)
               (if (string= (cdr (list-ref matches 1)) "sad")
@@ -188,23 +188,23 @@
 
 (with-warm-run
  "handles #:continue-on-error and #:on-fail properly"
- (assoc
+ (bind
   #:program "dummy"
   #:pattern "test-test-rule$"
   #:test "false"
   #:continue-on-error #t)
 
- (assoc
+ (bind
   #:pattern "test-test-rule$"
   #:program (program 'alternative))
 
- (assoc
+ (bind
   #:program "dummy"
   #:pattern "test-on-fail-rule$"
   #:test "false"
   #:on-fail (program 'on-fail))
 
- (assoc
+ (bind
   #:pattern "test-success-rule$"
   #:test "true"
   #:program (program 'test-success))
@@ -216,7 +216,7 @@
 (with-warm-run
  "skip #:test if something other than #:program is matched"
  (setenv "INSIDE_EMACS" "1")
- (assoc
+ (bind
   #:program (program 'sad)
   #:emacs (program 'happy)
   #:pattern "skip-test-test$"
@@ -226,13 +226,13 @@
 
 (with-warm-run
  "uses other alternative when #:continue-on-error is t"
- (assoc
+ (bind
   #:pattern "test-on-error-continue$"
   #:program "false"
   #:on-error "false"
   #:continue-on-error #t)
 
- (assoc
+ (bind
   #:pattern "test-on-error-continue$"
   #:program (program 'happy)
   #:on-error "false")
@@ -244,7 +244,7 @@
  "handles opening modes properly"
  (set! jaro-runner-method #:view)
 
- (assoc
+ (bind
   #:pattern "test-opening-mode$"
   #:program "false"
   #:on-error (program 'failed)
@@ -257,7 +257,7 @@
  "uses default environment program when mode is not found"
  (set! jaro-runner-method #:view)
 
- (assoc
+ (bind
   #:pattern "test-non-existent-opening-mode$"
   #:program (program 'happy)
   #:random-mode (program 'sad)
@@ -266,29 +266,29 @@
  (test-equal (jaro-run "test-non-existent-opening-mode") 'happy))
 
 (with-warm-run
- "uses a different assoc referencing it with open-with"
- (assoc
+ "uses a different binding referencing it with open-with"
+ (bind
   #:pattern "test-open-with$"
-  #:program (open-with 'another-assoc))
+  #:program (open-with 'another-binding))
 
- (assoc
-  #:name 'another-assoc
+ (bind
+  #:name 'another-binding
   #:pattern "random-pattern"
   #:program (program 'happy))
 
  (test-equal (jaro-run "test-open-with") 'happy))
 
 (with-warm-run
- "shows an error if named assoc is not found"
- (assoc
+ "shows an error if named binding is not found"
+ (bind
   #:pattern "test-open-with-missing$"
-  #:program (open-with 'missing-assoc))
+  #:program (open-with 'missing-binding))
 
  (test-equal (jaro-run "test-open-with-missing") 'jaro-non-zero-without-on-error))
 
 (with-warm-run
  "runs #:on-success when program runs successfully"
- (assoc
+ (bind
   #:pattern "test-on-success$"
   #:program "true"
   #:on-success (program 'happy))
@@ -298,7 +298,7 @@
 (with-warm-run
  "runs the program specified for a specific environment"
  (setenv "INSIDE_EMACS" "t")
- (assoc
+ (bind
   #:pattern "test-env$"
   #:program (program 'sad)
   #:emacs (program 'happy))
@@ -308,7 +308,7 @@
 (with-warm-run
  "runs the program specified for a specific environment"
  (setenv "VIMRUNTIME" "t")
- (assoc
+ (bind
   #:pattern "test-env$"
   #:program (program 'sad)
   #:env=VIMRUNTIME (program 'happy))
@@ -317,7 +317,7 @@
 
 (with-cold-run
  "(program) returns $input properly"
- (assoc
+ (bind
   #:pattern "program-test-input"
   #:program (program
              (format #f "~a" $input)))
@@ -326,7 +326,7 @@
 
 (with-cold-run
  "(program) returns submatches properly"
- (assoc
+ (bind
   #:pattern "program-test (\\w+) (\\w+) (\\w+)"
   #:program (program
              (format #f "~a ~a ~a" $1 $2 $3)))
@@ -339,7 +339,7 @@
  (setenv "INSIDE_EMACS" "1")
  (setenv "VIMRUNTIME" "1")
 
- (assoc
+ (bind
   #:pattern "test-prioritized-env-match$"
   #:emacs (program 'happy)
   #:vim (program 'sad))
@@ -352,7 +352,7 @@
  (setenv "VIMRUNTIME" "1")
  (set! jaro-env 'vim)
 
- (assoc
+ (bind
   #:pattern "test-prioritized-env-match$"
   #:emacs (program 'sad)
   #:vim (program 'happy))
@@ -366,7 +366,7 @@
  (setenv "VIMRUNTIME" "1")
  (set! jaro-env 'vim)
 
- (assoc
+ (bind
   #:pattern "test-prioritized-env-match$"
   #:emacs (program 'sad)
   #:vim (program 'happy))
@@ -375,7 +375,7 @@
 
 (with-cold-run
  "runs elisp code"
- (assoc
+ (bind
   #:pattern "test-elisp-macro$"
   #:program (elisp (message "hello")))
 
@@ -384,7 +384,7 @@
 
 (with-cold-run
  "runs elisp code and injects %f %F %1 %2 %3 ..."
- (assoc
+ (bind
   #:pattern "(test)-(elisp)-(macro)-(params)$"
   #:program (elisp (message "%f is %1-%2-%3-%4")))
 
@@ -393,7 +393,7 @@
 
 (with-cold-run
  "supports list of symbols"
- (assoc
+ (bind
   #:pattern "list-of-symbols-as-program-test$"
   #:program '(echo happy %f))
 
@@ -402,7 +402,7 @@
 
 (with-cold-run
  "does not change URLs when absolute path is requested"
- (assoc
+ (bind
   #:pattern ".*"
   #:program '(echo %F))
 
