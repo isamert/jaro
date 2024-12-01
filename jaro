@@ -503,6 +503,8 @@ Return #f if PROPERTY does not exist."
                  (plist-find #:display-name result desktop-files)
                  #:exec)]
                [exec
+                ;; FIXME need to comply with freedesktop standards
+                ;; https://specifications.freedesktop.org/desktop-entry-spec/1.1/ar01s06.html
                 (regexp-substitute
                  #f (string-match "(%f|%F|%u|%U)" app-exec)
                  'pre input 'post)])
