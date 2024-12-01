@@ -33,6 +33,11 @@ exec guile -e main -s "$0" "$@"
 
 (define jaro/emacsclient-binary "emacsclient")
 
+;; Config
+
+(define dynamic-menu-program #f)
+
+
 ;;
 ;; Utils
 ;;
@@ -445,16 +450,34 @@ Return #f if PROPERTY does not exist."
               (lambda (it) (plist-get it #:display-name))
               desktop-files)
              "\n")]
+           [binaries
+            (if (memq #:binaries args)
+                (system-binary-list)
+                '())]
            [binaries*
             (string-join
              (map
               (lambda (it) (string-append it "*"))
-              (if binaries (system-binary-list) '()))
+              binaries)
              "\n")]
-           [entries (string-trim (string-append named-assocs* "\n" desktop-files* "\n" binaries*))]
+           [entries
+            (->
+             (map
+              (lambda (it)
+                (case it
+                  [(#:alternatives) desktop-files*]
+                  [(#:binaries) binaries*]
+                  [else (let ((alt (get-named-alternative it)))
+                          (append! named-assocs alt)
+                          (plist-get alt #:display-name))]))
+              args)
+             (string-join "\n")
+             (string-trim-both))]
            ;; FIXME: directly send to the process instead of using shell pipes
-           [out (sh-out (string-append "printf '" entries "' | " cmd))]
-           [result (and=> out string-trim-both)])
+           [out
+            (sh-out (string-append "printf '" entries "' | " dynamic-menu-program))]
+           [result
+            (and=> out string-trim-both)])
       (cond
        [(not result)
         (display "No matches found!")
