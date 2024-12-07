@@ -62,6 +62,15 @@ exec guile -e main -s "$0" "$@"
     [(->> x fn) (fn x)]
     [(->> x fn rest ...) (->> (fn x) rest ...)]))
 
+(define-syntax oscase
+  (syntax-rules ()
+    [(oscase)
+     (error "Failed to detect system type! Error while using oscase.")]
+    [(oscase type value rest ...)
+     (if (equal? (system-type) (keyword->symbol type))
+         value
+         (oscase rest ...))]))
+
 (define (flip arg1 fn arg2)
   (fn arg2 arg1))
 
@@ -92,7 +101,7 @@ exec guile -e main -s "$0" "$@"
   (let ((typ (string-downcase (utsname:sysname (uname)))))
     (cond
      [(string-contains typ "darwin") 'darwin]
-     [(string-contains typ "linux") 'linux]
+     [(string-contains typ "linux") 'gnu/linux]
      [(string-contains typ "windows") 'windows])))
 
 (define (append-to-file file-path string)
