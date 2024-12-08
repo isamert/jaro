@@ -392,8 +392,8 @@ Return #f if PROPERTY does not exist."
      #:exec (hash-ref desktop-entry "Exec")
      #:term (and=> (hash-ref desktop-entry "Terminal") read-boolean)
      #:display-name (format #f "~a (~a)"
-                            (string-delete name #\")
-                            (string-delete comment #\")))))
+                            (string-delete #\" name)
+                            (string-delete #\" comment)))))
 
 (define (get-alternatives-for apps-dir mimetype)
   (or
@@ -426,50 +426,57 @@ Return #f if PROPERTY does not exist."
 (define (plist-find key item list)
   (find (λ (it) (equal? (plist-get it key) item)) list))
 
-(define (get-named-alternative binding-name)
-  "Get definitions of bindings from `jaro-named-bindings' with
-#:display-name added."
-  (let* ((val (hashq-ref jaro-named-bindings binding-name))
-         (comment (plist-get val #:comment)))
-    `(#:display-name
-      ,(format #f "> ~a~a"
-               (plist-get val #:name)
-               (if comment (format #f " (~a)" comment) ""))
-      ,@val)))
+(define (get-all-named-alternatives)
+  (hash-map->list
+   (lambda (key val)
+     `( #:display-name ,(make-binding-display-name val)
+        ,@val))
+   jaro-named-bindings))
+
+(define (make-binding-display-name binding)
+  (let* ((comment (plist-get binding #:comment)))
+    (format #f "> ~a~a"
+            (plist-get binding #:name)
+            (if comment (format #f " (~a)" comment) ""))))
 
 (define (select-one-of . args)
   (λ (input mimetype matches)
-    (let* ([named-bindings '()]
-           [desktop-files
+    (let* ([desktop-files
             (if (memq #:alternatives args)
                 (get-all-alternatives-for mimetype)
                 '())]
-           [desktop-files*
-            (string-join
-             (map
-              (cut plist-get <> #:display-name)
-              desktop-files)
-             "\n")]
            [binaries
             (if (memq #:binaries args)
                 (system-binary-list)
                 '())]
-           [binaries*
-            (string-join
-             (map
-              (cut string-append <> "*")
-              binaries)
-             "\n")]
+           [named-bindings
+            (get-all-named-alternatives)]
            [entries
             (->
              (map
               (λ (it)
                 (case it
-                  [(#:alternatives) desktop-files*]
-                  [(#:binaries) binaries*]
-                  [else (let ((alt (get-named-alternative it)))
-                          (set! named-bindings (append! named-bindings (list alt)))
-                          (plist-get alt #:display-name))]))
+                  [(#:alternatives)
+                   (string-join
+                    (map (cut plist-get <> #:display-name) desktop-files)
+                    "\n")]
+                  [(#:binaries)
+                   (string-join
+                    (map (cut string-append <> "*") binaries)
+                    "\n")]
+                  ;; TODO: bindings
+                  [(#:bindings)
+                   (string-join
+                    (map (cut plist-get <> #:display-name) named-bindings)
+                    "\n")]
+                  [else
+                   (when (keyword? it)
+                     (error (format #f "select-one-of: not a valid keyword: ~a" it)))
+                   (make-binding-display-name
+                    (or
+                     (hashq-ref jaro-named-bindings it)
+                     (error (format #f "select-one-of: Binding '~a' not found binding definitions!" it))))
+                   ]))
               args)
              (string-join "\n")
              (string-trim-both))]
@@ -505,7 +512,7 @@ Return #f if PROPERTY does not exist."
         (system* (string-trim-right result #\*) input)]
        ;; ?
        [else
-        (display (format #f "Input ~a is not a command!" result))
+        (format #t "select-one-of: Input ~a is not a command!" result)
         (newline)
         (exit 1)]))))
 
