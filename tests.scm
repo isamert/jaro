@@ -16,6 +16,8 @@
        (set! jaro-cold-run? #t)
        (set! jaro-bindings '())
        (set! jaro-named-bindings (make-hash-table))
+       ;; FIXME(pDWQKhh): Following also removes the defaults
+       ;; (set! jaro-conditional-runners (make-hash-table))
        (set! jaro-runner-method #f)
        (set! jaro-env #f)
        body ...))))
@@ -28,6 +30,8 @@
        (set! jaro-cold-run? #f)
        (set! jaro-bindings '())
        (set! jaro-named-bindings (make-hash-table))
+       ;; FIXME(pDWQKhh): Following also removes the defaults
+       ;; (set! jaro-conditional-runners (make-hash-table))
        (set! jaro-runner-method #f)
        (set! jaro-env #f)
        body ...))))
@@ -170,7 +174,7 @@
  "is able to access matching groups in a procedural #:program"
  (bind
   #:pattern "fn-test.(\\w+)$"
-  #:program (lambda (input mimetype matches)
+  #:program (lambda* (input mimetype matches #:rest _)
               (format #f "~a - ~a - ~a" input mimetype matches)))
 
  (test-equal (jaro-run "fn-test.mp4") "fn-test.mp4 - #f - ((%0 . fn-test.mp4) (%1 . mp4))"))
@@ -179,7 +183,7 @@
  "conditionally fails based on given path"
  (bind
   #:pattern '("fn-(\\w+)-test$")
-  #:program (lambda (_1 _2 matches)
+  #:program (lambda* (_1 _2 matches #:rest _)
               (if (string= (cdr (list-ref matches 1)) "sad")
                   #f 'happy))
   #:on-error (program 'sad))
@@ -334,16 +338,35 @@
  (test-equal (jaro-run "program-test happy also happy") "happy also happy"))
 
 (with-cold-run
- "selects prioritezed environment when multiple environment matches are found"
- (setenv "TMUX" "1")
+ "should run first one if more than one conditionals are matching"
+
  (setenv "INSIDE_EMACS" "1")
  (setenv "VIMRUNTIME" "1")
 
  (bind
-  #:pattern "test-prioritized-env-match$"
+  #:pattern "test-prioritized-order-env-match$"
   #:emacs (program 'happy)
   #:vim (program 'sad))
 
+ (bind
+  #:pattern "test-prioritized-order-env-match2$"
+  #:vim (program 'happy)
+  #:emacs (program 'sad))
+
+ (test-equal (jaro-run "test-prioritized-order-env-match") 'happy)
+ (test-equal (jaro-run "test-prioritized-order-env-match2") 'happy))
+
+(with-cold-run
+ "selects supplied environment instead of running ones"
+ (setenv "INSIDE_EMACS" "1")
+ (setenv "VIMRUNTIME" "1")
+ (set! jaro-env 'vim)
+
+ (bind
+  #:pattern "test-prioritized-env-match$"
+  #:emacs (program 'sad)
+  #:vim (program 'happy))
+
  (test-equal (jaro-run "test-prioritized-env-match") 'happy))
 
 (with-cold-run
@@ -359,19 +382,38 @@
 
  (test-equal (jaro-run "test-prioritized-env-match") 'happy))
 
-
 (with-cold-run
- "selects supplied environment instead of running ones"
- (setenv "INSIDE_EMACS" "1")
- (setenv "VIMRUNTIME" "1")
- (set! jaro-env 'vim)
+ "correctly runs the matching conditional runner"
+
+ (define-conditional-runner (runner1 _)
+   #f)
+
+ (define-conditional-runner (runner2 _)
+   #t)
 
  (bind
-  #:pattern "test-prioritized-env-match$"
-  #:emacs (program 'sad)
-  #:vim (program 'happy))
+  #:pattern "test$"
+  #:runner1 (program 'sad)
+  #:runner2 (program 'happy))
 
- (test-equal (jaro-run "test-prioritized-env-match") 'happy))
+ (test-equal (jaro-run "test") 'happy))
+
+(with-cold-run
+ "runs #:program if no conditional runners are matching"
+
+ (define-conditional-runner (runner1 _)
+   #f)
+
+ (define-conditional-runner (runner2 _)
+   #f)
+
+ (bind
+  #:pattern "test$"
+  #:program (program 'happy)
+  #:runner1 (program 'sad)
+  #:runner2 (program 'sad))
+
+ (test-equal (jaro-run "test") 'happy))
 
 (with-cold-run
  "runs elisp code"
@@ -419,7 +461,5 @@
 (test-equal (sh-out "false") #f)
 (test-equal (sh-out '("echo" "happy")) "happy\n")
 (test-equal (sh-out '("false")) #f)
-
-
 
 (test-end "all-tests")

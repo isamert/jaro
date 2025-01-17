@@ -25,10 +25,16 @@ exec guile -e main -s "$0" "$@"
 
 (define jaro-bindings '())
 (define jaro-named-bindings (make-hash-table))
+(define jaro-conditional-runners (make-hash-table))
 (define jaro-env #f)
 (define jaro-cold-run? #t)
 (define jaro-runner-method #f)
 (define jaro-debug? #f)
+
+(define (get-named-binding-or-bail! name)
+  (or
+   (hashq-ref jaro-named-bindings name)
+   (error (format #f "Binding '~a' not found binding definitions!" name))))
 
 ;;; Config
 
@@ -69,6 +75,12 @@ exec guile -e main -s "$0" "$@"
   (fn arg2 arg1))
 
 (define specified? (compose not unspecified?))
+
+(define (string->keyword str)
+  (symbol->keyword
+   (string->symbol (if (string-prefix? "#:" str)
+                       (substring str 2)
+                       str))))
 
 (define (sh cmd)
   (let* ([error-pipe (pipe)]
@@ -115,11 +127,23 @@ Return #f if PROPERTY does not exist."
          (plist-get rest property)))
     (_ #f)))
 
+(define (plist-keys plist)
+  "Return keys of PLIST."
+  (let loop ((result '())
+             (current plist))
+    (match current
+      (() result)
+      ((prop val rest ...) (loop (append result (list prop)) rest)))))
+
 (define (string-split-once str pattern)
   (let ((result (string-split str pattern)))
     (list
      (car result)
      (string-join (list-tail result 1) (format #f "~a" pattern)))))
+
+(define (tap x)
+  (display (format #f ">>> ~a\n" x))
+  x)
 
 ;;; Mimetype
 
@@ -151,6 +175,28 @@ Return #f if PROPERTY does not exist."
       (mimetype-of-uri path)
       (mimetype-of-file path)))))
 
+;;; Conditional runners
+
+(define-syntax define-conditional-runner
+  (syntax-rules ()
+    ((_ (name arg) body ...)
+     (hash-set! jaro-conditional-runners 'name (lambda (arg) body ...)))))
+
+(define-conditional-runner (emacs _)
+  (or (getenv "INSIDE_EMACS") (string-contains-ci (or (getenv "_") "") "emacs")))
+
+(define-conditional-runner (tmux _)
+  (getenv "TMUX"))
+
+(define-conditional-runner (screen _)
+  (getenv "STY"))
+
+(define-conditional-runner (vim _)
+  (getenv "VIMRUNTIME"))
+
+(define-conditional-runner (term _)
+  (isatty? (current-output-port)))
+
 ;;; Pattern
 
 (define (run-regexp pattern input mimetype)
@@ -174,18 +220,6 @@ Return #f if PROPERTY does not exist."
    ((regexp? pattern) pattern)
    ((list? pattern) (map compile-pattern pattern))))
 
-(define (running-environments)
-  (filter
-   identity
-   (list
-    (and jaro-env (symbol->keyword jaro-env))
-    (and (getenv "TMUX") #:tmux)
-    (and (getenv "STY") #:screen)
-    (and (or (getenv "INSIDE_EMACS") (string-contains-ci (or (getenv "_") "") "emacs")) #:emacs)
-    (and (getenv "VIMRUNTIME") #:vim)
-    (and (isatty? (current-output-port)) #:term)
-    #:program)))
-
 (define (binding->env-program binding)
   (find
    (λ (it)
@@ -196,22 +230,31 @@ Return #f if PROPERTY does not exist."
        #t))
    binding))
 
-(define (binding->runner binding)
+(define (binding->runner binding input)
   "Get the running strategy for given BINDING based on the environment."
   (or
+   ;; Directly run the --method=... if it's available
    (and-let* ([method jaro-runner-method]
               [runner (plist-get binding method)])
      (cons method runner))
+   ;; Run the #:env=...
    (and-let* ([method (binding->env-program binding)]
               [runner (plist-get binding method)])
      (cons method runner))
-   (first
-    (filter-map
-     (λ (it)
-       (and-let* ([method it]
-                  [runner (plist-get binding method)])
-         (cons method runner)))
-     (running-environments)))))
+   ;; Find the conditional runner and run
+   (and-let* ([try-list (append
+                         (if jaro-env (list (symbol->keyword jaro-env)) '())
+                         (remove
+                          non-program-key?
+                          (plist-keys binding)))]
+              [method (find (lambda (key)
+                              ((or (hash-ref jaro-conditional-runners (keyword->symbol key))
+                                   (lambda (_) #f))
+                               input))
+                            try-list)])
+     (cons method (plist-get binding method)))
+   ;; Simply run the #:program
+   (cons #:program (plist-get binding #:program))))
 
 ;;; Running programs
 
@@ -229,6 +272,9 @@ Return #f if PROPERTY does not exist."
       (and (list? it) (not (null-list? it)))
       (and (symbol? it) (hashq-get-handle jaro-named-bindings it))))
 
+(define (non-program-key? x)
+  (member x (list #:program #:pattern)))
+
 (define (jaro-system program)
   (jaro-debug "(jaro-system ~a)" program)
   (cond
@@ -238,13 +284,14 @@ Return #f if PROPERTY does not exist."
            ((string? program) (system program))
            ((list? program) (apply system* program))))]))
 
-(define (run-program program pattern input)
+(define (run-program program pattern input binding)
   (cond
    [(procedure? program)
     (program
      input
      (mimetype input)
-     (get-matches program pattern input))]
+     (get-matches program pattern input)
+     binding)]
    [(or (list? program) (string? program))
     (jaro-system (format-program program (get-matches program pattern input) input))]
    [(symbol? program)
@@ -422,7 +469,6 @@ Return #f if PROPERTY does not exist."
      (or (getenv "XDG_DATA_DIRS")  "/usr/local/share/:/usr/share/")
      #\:))))
 
-
 (define (plist-find key item list)
   (find (λ (it) (equal? (plist-get it key) item)) list))
 
@@ -440,7 +486,7 @@ Return #f if PROPERTY does not exist."
             (if comment (format #f " (~a)" comment) ""))))
 
 (define (select-one-of . args)
-  (λ (input mimetype matches)
+  (λ (input mimetype matches binding)
     (let* ([desktop-files
             (if (memq #:alternatives args)
                 (get-all-alternatives-for mimetype)
@@ -448,6 +494,10 @@ Return #f if PROPERTY does not exist."
            [binaries
             (if (memq #:binaries args)
                 (system-binary-list)
+                '())]
+           [methods
+            (if (memq #:methods args)
+                (remove non-program-key? (plist-keys binding))
                 '())]
            [named-bindings
             (get-all-named-alternatives)]
@@ -469,14 +519,23 @@ Return #f if PROPERTY does not exist."
                    (string-join
                     (map (cut plist-get <> #:display-name) named-bindings)
                     "\n")]
+                  [(#:methods)
+                   (string-join
+                    (map (cut format #f "~a" <>) methods)
+                    "\n")]
                   [else
                    (when (keyword? it)
                      (error (format #f "select-one-of: not a valid keyword: ~a" it)))
-                   (make-binding-display-name
-                    (or
-                     (hashq-ref jaro-named-bindings it)
-                     (error (format #f "select-one-of: Binding '~a' not found binding definitions!" it))))
-                   ]))
+                   ;; Resolve stuff like 'binding/method
+                   (match (string-split-once (symbol->string it) #\.)
+                     [(_ "")
+                      (make-binding-display-name (get-named-binding-or-bail! it))]
+                     [(parent method)
+                      (format
+                       #f "~a.~a"
+                       (make-binding-display-name
+                        (get-named-binding-or-bail! (string->symbol parent)))
+                       method)])]))
               args)
              (string-join "\n")
              (string-trim-both))]
@@ -491,9 +550,18 @@ Return #f if PROPERTY does not exist."
         (display "No matches found!")
         (newline)
         (exit 1)]
-       ;; Named binding
-       [(string-prefix? ">" result)
-        (run-binding (plist-find #:display-name result named-bindings) '() input)]
+       ;; Named binding & NamedBinding.method
+       [(and (string-prefix? ">" result))
+        (match (string-split-once result #\.)
+          [(_ "")
+           (run-binding (plist-find #:display-name result named-bindings) '() input)]
+          [(parent method)
+           (run-program
+            (plist-get
+             (plist-find #:display-name parent named-bindings)
+             (string->keyword method))
+            (plist-get binding #:pattern)
+            input binding)])]
        ;; Desktop file
        [(string-suffix? ")" result)
         (let* ([app-exec
@@ -510,6 +578,12 @@ Return #f if PROPERTY does not exist."
        ;; Binary
        [(string-suffix? "*" result)
         (system* (string-trim-right result #\*) input)]
+       ;; Method
+       [(string-prefix? "#:" result)
+        (run-program
+         (plist-get binding (string->keyword result))
+         (plist-get binding #:pattern)
+         input binding)]
        ;; ?
        [else
         (format #t "select-one-of: Input ~a is not a command!" result)
@@ -542,13 +616,14 @@ Return #f if PROPERTY does not exist."
        (with-syntax ((input (datum->syntax x '$input))
                      (mimetype (datum->syntax x '$mimetype))
                      (matches (datum->syntax x '$matches))
+                     (binding (datum->syntax x '$binding))
                      ($0 (datum->syntax x '$0))
                      ($1 (datum->syntax x '$1))
                      ($2 (datum->syntax x '$2))
                      ($3 (datum->syntax x '$3))
                      ($4 (datum->syntax x '$4))
                      ($5 (datum->syntax x '$5)))
-         #'(λ (input mimetype matches)
+         #'(λ (input mimetype matches binding)
              (let ([$0 (assoc-ref matches "%0")]
                    [$1 (assoc-ref matches "%1")]
                    [$2 (assoc-ref matches "%2")]
@@ -560,7 +635,7 @@ Return #f if PROPERTY does not exist."
 (define-syntax elisp
   (syntax-rules ()
     ((_ exp ...)
-     (λ (input mimetype matches)
+     (λ (input mimetype matches binding)
        (jaro-system
         (list
          emacsclient-binary "--eval"
@@ -580,7 +655,7 @@ Return #f if PROPERTY does not exist."
 
 (define (run-binding binding alternatives input)
   (let* ([pattern (plist-get binding #:pattern)]
-         [program-info (binding->runner binding)]
+         [program-info (binding->runner binding input)]
          [program-env (car program-info)]
          [program (cdr program-info)]
          [test (plist-get binding #:test)]
@@ -591,14 +666,14 @@ Return #f if PROPERTY does not exist."
     (jaro-debug "running ~a with input" binding input)
     (cond
      [(or (not test)
-          (and test (run-program test pattern input))
+          (and test (run-program test pattern input binding))
           ;; TODO Why?
           (and test (not (equal? program-env #:program))))
-      (let ((success? (run-program program pattern input)))
+      (let ((success? (run-program program pattern input binding)))
         (jaro-debug "running result is ~a" success?)
         (cond
          ((and success? on-success)
-          (run-program on-success pattern input))
+          (run-program on-success pattern input binding))
          (success?
           success?)
          ((or (eq? on-error 'continue) continue-on-error)
@@ -606,12 +681,12 @@ Return #f if PROPERTY does not exist."
          ((eq? on-error #f)
           'jaro-non-zero-without-on-error)
          ((program? on-error)
-          (run-program on-error pattern input))
+          (run-program on-error pattern input binding))
          (else
           'jaro-run-binding-failed)))]
      [(and test (program? on-fail))
       (jaro-debug "test failed, running on-fail")
-      (run-program on-fail pattern input)]
+      (run-program on-fail pattern input binding)]
      [(and test (eqv? on-fail 'stop))
       (jaro-debug "test failed, on-fail stops the execution")
       'jaro-match-failed]
