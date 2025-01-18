@@ -274,7 +274,17 @@ Return #f if PROPERTY does not exist."
       (and (symbol? it) (hashq-get-handle jaro-named-bindings it))))
 
 (define (non-program-key? x)
-  (member x (list #:program #:pattern)))
+  (member
+   x
+   (list
+    #:name
+    #:program
+    #:pattern
+    #:test
+    #:on-fail
+    #:on-success
+    #:on-error
+    #:continue-on-error)))
 
 (define (jaro-system program)
   (jaro-debug "(jaro-system ~a)" program)
@@ -474,16 +484,23 @@ Return #f if PROPERTY does not exist."
   (find (λ (it) (equal? (plist-get it key) item)) list))
 
 (define (get-all-named-alternatives)
-  (hash-map->list
-   (lambda (key val)
-     `( #:display-name ,(make-binding-display-name val)
-        ,@val))
-   jaro-named-bindings))
+  (apply
+   append
+   (hash-map->list
+    (lambda (key val)
+      (map
+       (lambda (prog)
+         `(#:display-name
+           ,(make-binding-display-name val (if (eq? prog 'self) #f prog))
+           ,@val))
+       `(self ,@(remove non-program-key? (plist-keys val)))))
+    (tap jaro-named-bindings))))
 
-(define (make-binding-display-name binding)
+(define* (make-binding-display-name binding #:optional method)
   (let* ((comment (plist-get binding #:comment)))
-    (format #f "> ~a~a"
+    (format #f "> ~a~a~a"
             (plist-get binding #:name)
+            (if method (format #f ".~a" (symbol->string (keyword->symbol method))) "")
             (if comment (format #f " (~a)" comment) ""))))
 
 (define (select-one-of . args)
@@ -501,7 +518,9 @@ Return #f if PROPERTY does not exist."
                 (remove non-program-key? (plist-keys binding))
                 '())]
            [named-bindings
-            (get-all-named-alternatives)]
+            (if (memq #:bindings args)
+                (get-all-named-alternatives)
+                '())]
            [entries
             (->
              (map
@@ -515,7 +534,6 @@ Return #f if PROPERTY does not exist."
                    (string-join
                     (map (cut string-append <> "*") binaries)
                     "\n")]
-                  ;; TODO: bindings
                   [(#:bindings)
                    (string-join
                     (map (cut plist-get <> #:display-name) named-bindings)
@@ -527,7 +545,7 @@ Return #f if PROPERTY does not exist."
                   [else
                    (when (keyword? it)
                      (error (format #f "select-one-of: not a valid keyword: ~a" it)))
-                   ;; Resolve stuff like 'binding/method
+                   ;; Resolve 'binding.method
                    (match (string-split-once (symbol->string it) #\.)
                      [(_ "")
                       (make-binding-display-name (get-named-binding-or-bail! it))]
@@ -603,7 +621,7 @@ Return #f if PROPERTY does not exist."
 
 (define* (bind #:key pattern name #:allow-other-keys #:rest args)
   (set! jaro-bindings (append! jaro-bindings `((#:pattern ,(compile-pattern pattern) ,@args))))
-  (when (specified? name)
+  (when name
     (hashq-set! jaro-named-bindings name args)))
 
 (define (open-with name)
