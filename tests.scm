@@ -64,6 +64,22 @@
 
  (test-equal (jaro-run "test-on-error") 'jaro-non-zero-without-on-error))
 
+(with-cold-run
+ "#:program runs properly with string list"
+ (bind
+  #:pattern "^.*/.*"
+  #:program '("mpv" "%f"))
+
+ (test-equal (jaro-run "~/a.mp4") '("mpv" "~/a.mp4")))
+
+(with-cold-run
+ "#:program runs properly with symbol list"
+ (bind
+  #:pattern "^.*/.*"
+  #:program '(mpv  %f))
+
+ (test-equal (jaro-run "~/a.mp4") '("mpv" "~/a.mp4")))
+
 (with-warm-run
  "run #:on-error in case of #:program fails"
  (bind
