@@ -494,7 +494,7 @@ Return #f if PROPERTY does not exist."
            ,(make-binding-display-name val (if (eq? prog 'self) #f prog))
            ,@val))
        `(self ,@(remove non-program-key? (plist-keys val)))))
-    (tap jaro-named-bindings))))
+    jaro-named-bindings)))
 
 (define* (make-binding-display-name binding #:optional method)
   (let* ((comment (plist-get binding #:comment)))
@@ -572,7 +572,10 @@ Return #f if PROPERTY does not exist."
             (and=> out string-trim-both)])
       (cond
        [jaro-cold-run?
-        (list 'select-one-of result)]
+        (list 'select-one-of
+              ;; sort it just to have predictable tests, otherwise
+              ;; hash table stuff may break things
+              (sort-list (string-split result #\newline) string<))]
        [(not result)
         (display "No matches found!")
         (newline)

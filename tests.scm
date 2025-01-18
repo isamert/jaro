@@ -18,6 +18,7 @@
        ;; (set! jaro-conditional-runners (make-hash-table))
        (set! jaro-runner-method #f)
        (set! jaro-env #f)
+       (set! dynamic-menu-program #f)
        body ...))))
 
 (define-syntax with-warm-run
@@ -32,6 +33,7 @@
        ;; (set! jaro-conditional-runners (make-hash-table))
        (set! jaro-runner-method #f)
        (set! jaro-env #f)
+       (set! dynamic-menu-program #f)
        body ...))))
 
 ;;; All tests
@@ -447,6 +449,161 @@
  (test-equal (jaro-run "https://isamert.net")
    '("echo" "https://isamert.net")))
 
+;;; select-one-of
+
+(with-cold-run
+ "select-one-of #:methods returns the methods of the binding"
+
+ (set! dynamic-menu-program "cat")
+
+ (bind
+  #:pattern ".*"
+  #:program (select-one-of #:methods)
+  #:continue-on-error #t
+  #:program1 (program 'happy)
+  #:program2 (program 'happy))
+
+ (test-equal (jaro-run "something")
+   '(select-one-of ("#:program1"
+                    "#:program2"))))
+
+
+(with-cold-run
+ "select-one-of can access methods of another named binding, in given order"
+
+ (set! dynamic-menu-program "cat")
+
+ (bind
+  #:pattern ".*"
+  #:program (select-one-of 'named-binding.program1
+                           'binding2.program2
+                           'binding2.program1)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'named-binding
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding2
+  #:program (select-one-of #:methods)
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:program2 (program 'dummy))
+
+ (test-equal (jaro-run "something")
+   '(select-one-of ("> binding2.program1"
+                    "> binding2.program2"
+                    "> named-binding.program1"))))
+
+(with-warm-run
+ "select-one-of successfully selects and runs the given method"
+
+ ;; Select it by just printing what we want to select
+ (set! dynamic-menu-program "printf '#:program1'")
+
+ (bind
+  #:pattern ".*"
+  #:program (select-one-of #:methods)
+  #:program1 (program 'happy)
+  #:continue-on-error #t)
+
+ (test-equal (jaro-run "something") 'happy))
+
+(with-cold-run
+ "select-one-of #:bindings lists all bindings and their methods correctly"
+
+ (set! dynamic-menu-program "cat")
+
+ (bind
+  #:pattern ".*"
+  #:program (select-one-of #:bindings)
+  #:program1 (program 'happy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding1
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:continue-on-error #t)
+
+ ;; unnamed
+ (bind
+  #:program (program 'dummy)
+  #:program5 (program 'dummy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding2
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:program2 (program 'dummy)
+  #:program3 (program 'dummy)
+  #:continue-on-error #t)
+
+ (test-equal (jaro-run "something")
+   '(select-one-of ("> binding1"
+                    "> binding1.program1"
+                    "> binding2"
+                    "> binding2.program1"
+                    "> binding2.program2"
+                    "> binding2.program3"))))
+
+(with-warm-run
+ "select-one-of runs the selected bindings method correctly"
+
+ (set! dynamic-menu-program "printf '> binding2.program3'")
+
+ (bind
+  #:pattern ".*"
+  #:program (select-one-of #:bindings #:methods)
+  #:program1 (program 'dummy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding1
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding2
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:program2 (program 'dummy)
+  #:program3 (program 'happy)
+  #:continue-on-error #t)
+
+ (test-equal (jaro-run "something") 'happy))
+
+(with-warm-run
+ "select-one-of runs the selected bindings correctly"
+
+ (set! dynamic-menu-program "printf '> binding2'")
+
+ (bind
+  #:pattern ".*"
+  #:program (select-one-of #:bindings #:methods)
+  #:program1 (program 'dummy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding1
+  #:program (program 'dummy)
+  #:program1 (program 'dummy)
+  #:continue-on-error #t)
+
+ (bind
+  #:name 'binding2
+  #:program (program 'happy)
+  #:program1 (program 'dummy)
+  #:program2 (program 'dummy)
+  #:program3 (program 'dummy)
+  #:continue-on-error #t)
+
+ (test-equal (jaro-run "something") 'happy))
 
 ;;; sh, sh-out
 
