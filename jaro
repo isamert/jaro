@@ -16,6 +16,7 @@ exec guile -e main -s "$0" "$@"
  (ice-9 poe)
  (ice-9 getopt-long)
  (ice-9 receive)
+ (ice-9 string-fun)
  (web uri)
  (srfi srfi-1)
  (srfi srfi-2)
@@ -542,10 +543,18 @@ Return #f if PROPERTY does not exist."
            [out
             ;; FIXME: directly send to the process instead of using shell pipes
             ;; https://debbugs.gnu.org/cgi/bugreport.cgi?bug=52835
-            (sh-out (string-append "printf '" entries "' | " dynamic-menu-program))]
+            (sh-out (string-append
+                     "printf "
+                     "'"
+                     (string-replace-substring entries "'" "")
+                     "'"
+                     " | "
+                     dynamic-menu-program))]
            [result
             (and=> out string-trim-both)])
       (cond
+       [jaro-cold-run?
+        (list 'select-one-of result)]
        [(not result)
         (display "No matches found!")
         (newline)

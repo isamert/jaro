@@ -4,9 +4,7 @@
 (use-modules
  (srfi srfi-64))
 
-;;
-;; Some macros
-;;
+;;; Preperation
 
 (define-syntax with-cold-run
   (syntax-rules ()
@@ -36,9 +34,7 @@
        (set! jaro-env #f)
        body ...))))
 
-;;
-;; Tests
-;;
+;;; All tests
 
 (test-begin "all-tests")
 
@@ -452,7 +448,7 @@
    '("echo" "https://isamert.net")))
 
 
-;; sh, sh-out
+;;; sh, sh-out
 
 (test-equal (sh "echo 'happy'") 0)
 (test-equal (sh "false") 256)
