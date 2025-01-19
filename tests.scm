@@ -6,19 +6,26 @@
 
 ;;; Preperation
 
+(define (clear-state)
+  (unsetenv "INSIDE_EMACS")
+  (unsetenv "VIMRUNTIME")
+  (unsetenv "TMUX")
+  (unsetenv "STY")
+  (set! jaro-cold-run? #f)
+  (set! jaro-bindings '())
+  (set! jaro-named-bindings (make-hash-table))
+  (set! jaro-runner-method #f)
+  (set! jaro-env #f)
+  (set! dynamic-menu-program #f)
+  (set! jaro-cold-run? #f))
+
 (define-syntax with-cold-run
   (syntax-rules ()
     ((with-cold-run test-name body ...)
      (begin
        (format #t ">>>>> Running ~a <<<<<\n" test-name)
+       (clear-state)
        (set! jaro-cold-run? #t)
-       (set! jaro-bindings '())
-       (set! jaro-named-bindings (make-hash-table))
-       ;; FIXME(pDWQKhh): Following also removes the defaults
-       ;; (set! jaro-conditional-runners (make-hash-table))
-       (set! jaro-runner-method #f)
-       (set! jaro-env #f)
-       (set! dynamic-menu-program #f)
        body ...))))
 
 (define-syntax with-warm-run
@@ -26,14 +33,7 @@
     ((with-warm-run test-name body ...)
      (begin
        (format #t ">>>>> Running ~a <<<<<\n" test-name)
-       (set! jaro-cold-run? #f)
-       (set! jaro-bindings '())
-       (set! jaro-named-bindings (make-hash-table))
-       ;; FIXME(pDWQKhh): Following also removes the defaults
-       ;; (set! jaro-conditional-runners (make-hash-table))
-       (set! jaro-runner-method #f)
-       (set! jaro-env #f)
-       (set! dynamic-menu-program #f)
+       (clear-state)
        body ...))))
 
 ;;; All tests
