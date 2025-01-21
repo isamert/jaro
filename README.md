@@ -27,7 +27,7 @@ General usage:
 jaro [OPTIONS] <URI>
 ```
 
-### Options
+### Command Line Options
 
 - `-t`, `--mime-type`: Print the MIME type of the URI.
 - `-c`, `--cold-run`: Simulate the actions without executing them.
@@ -81,7 +81,7 @@ stat $(which xdg-open)
 
 ## Configuration
 
-jaro, by default, looks for the file `~/.config/associations` and loads it. This file contains multiple `(bind ...)` definitions and arbitrary Guile Scheme code. jaro will try to match the given URI with each binding in order. I'll go trough some examples that shows you binding files/URIs with programs.
+jaro, by default, looks for the file `~/.config/associations` and loads it. This file contains multiple `(bind ...)` definitions and (optionally) some arbitrary Guile Scheme code. jaro will try to match the given URI with each binding in order. I'll go trough some examples that shows you binding files/URIs with programs.
 
 Here is a pretty basic rule for associating all image types with `sxiv`:
 
@@ -99,7 +99,7 @@ Here is another example that opens all YouTube links with `mpv`:
  #:program '(mpv %f))
 ```
 
-Let's go back to first example, and make a small addition.
+Let's go back to first example, and make a small addition:
 
 ```scheme
 (bind
@@ -110,7 +110,7 @@ Let's go back to first example, and make a small addition.
 
 When you run `jaro an-image.png`, this does exactly the same thing as the first binding. When you run `jaro --method=gallery an-image.png` however, instead of opening the image with `sxiv`, jaro uses `nomacs` now.
 
-Some of the keywords (things that start with `#:`) have a reserved meaning in jaro. In addition to them, you can define arbitrary modes/methods like the `#:gallery` example from above. The following keywords are reserved:
+Some of the keywords (things that start with `#:`) have a reserved meaning in jaro. In addition to them, you can define arbitrary *methods* like the `#:gallery` example from above. The following keywords are reserved:
 
 - `#:name`: Assigns a unique identifier to a binding, which can be referenced by other bindings or methods.
 - `#:program`: Specifies the command or application to be executed when the pattern matches. Can be a string, list, or Scheme procedure.
@@ -120,15 +120,9 @@ Some of the keywords (things that start with `#:`) have a reserved meaning in ja
 - `#:on-success`: Defines a command or procedure to run if the `#:program` executes successfully.
 - `#:on-error`: Specifies a command or procedure to execute if the `#:program` fails. This can also be set to 'continue' to try alternative bindings.
 
-This association opens given any URL that starts with http or https in `qutebrowser` if it's already open. If `qutebrowser` is not open, it'll simply open the URL in `firefox`.
+These are discussed in detail in [Configuration Reference](#configuration-reference).
 
-``` scheme
-(bind
- #:pattern "^https?://.*"
- #:program "qutebrowser %f"
- #:test "pgrep qutebrowser"
- #:on-fail "firefox %f")
-```
+## A more advanced configuration example
 
 Here is a commented configuration that illustrates advanced features of `jaro`:
 
@@ -175,11 +169,24 @@ Here is a commented configuration that illustrates advanced features of `jaro`:
  ;; opening this file to nomacs definition down below
  #:gallery 'nomacs)
 
+;; Open a Zoom link. Extract the meeting number and password from the
+;; link using regexp capture groups and feed it into the zoom app
+;; using t %1 and %2
+(bind
+ #:pattern "https://.*zoom\\.us/j/(\\w+)\\?pwd=(\\w+)"
+ #:program '(zoom zoommtg://zoom.us/join?confno=%1&pwd=%2))
+
+(bind
+ #:pattern "https://.*zoom\\.us/j/(\\w+)\\?pwd=(\\w+)"
+ #:program '(zoom zoommtg://zoom.us/join?confno=%1&pwd=%2))
+
 ;; If a compressed file is opened with jaro, then display a menu using
 ;; rofi (on Linux) or choose (on MacOS) to as user what to do with
 ;; this file. See beginning of this example file for menu program
 ;; configuration.
 (bind
+ ;; Give this binding a name, which we will utilize later
+ #:name 'archive
  #:pattern "^application/(x-)?(tar|gzip|bzip2|lzma|xz|compress|7z|rar|gtar|zip)(-compressed)?"
  ;; Instead of doing something directly, let user select one of the
  ;; methods (#:unpack, #:unpack-to-directory, #:view) of this binding.
@@ -192,12 +199,24 @@ Here is a commented configuration that illustrates advanced features of `jaro`:
  ;; Open the archive using `file-roller`.
  #:view '(file-roller %f))
 
-;; Open a Zoom link. Extract the meeting number and password from the
-;; link using regexp capture groups and feed it into the zoom app
-;; using t %1 and %2
 (bind
- #:pattern "https://.*zoom\\.us/j/(\\w+)\\?pwd=(\\w+)"
- #:program '(zoom zoommtg://zoom.us/join?confno=%1&pwd=%2))
+ ;; Given a jar or apk file...
+ #:pattern ".(jar|apk)$"
+ ;; ...show a menu of: run, archive.unpack, archive.unpack-to-directory
+ #:program (select-one-of #:methods 'archive.view 'archive.unpack 'archive.unpack-to-directory)
+ ;; ^^ #:methods refers the methods of this binding. There is only one: "run"
+ ;; ^^ 'archive.<method> refers to the methods of 'archive binding.
+
+ ;; Here, instead of directly running an external command we use the
+ ;; "program" syntax. It simply let's us run arbitrary Guile scheme
+ ;; code. Inside "program", the variables $1 $2 $3... etc are bound to
+ ;; the capture groups from the #:pattern and the "run" let's you run
+ ;; external programs using the syntax that you are familiar from the
+ ;; earlier bindings.
+ #:run (program
+         (match $1
+           ["jar" (run (java -jar %f))]
+           ["apk" (run (notify-send "Can't run APK files. Install an Android Emulator?"))])))
 
 ;; A named binding, referenced above
 (bind
@@ -206,7 +225,7 @@ Here is a commented configuration that illustrates advanced features of `jaro`:
  #:program '(nomacs %f))
 ```
 
-## Reference
+## Configuration reference
 ### #:pattern
 ### #:program and other methods
 
