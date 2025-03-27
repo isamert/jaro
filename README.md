@@ -1,6 +1,6 @@
 # jaro
 
-_jaro_ is a *j*ust *a*nother *r*esource *o*pener. It runs the appropriate application to open a given file or URL based on customizable configurations. These configurations are written in Guile Scheme, offering powerful extensions for advanced users while maintaining simplicity and ease of use for everyone. No prior knowledge of Scheme is required to configure _jaro_ — the process is intuitive and straightforward.
+_jaro_ is a *j*ust *a*nother *r*esource *o*pener. It runs the appropriate application to open a given file or URL based on given configurations.
 
 ## Usage
 
@@ -226,36 +226,268 @@ Here is a commented configuration that illustrates advanced features of `jaro`:
 ```
 
 ## Configuration reference
+
 ### #:pattern
+
+Defines regular expressions to match against URIs or MIME types. Can be:
+- Single regex string (`"image/.*"`)
+- Compiled regex object
+- List of patterns (`'("\.txt$" "text/.*")`)
+
+Patterns are checked against both the input URI and its detected MIME type. Capture groups can be referenced in commands using `%1`, `%2`, etc.
+
+Example:
+
+```scheme
+(bind
+ #:pattern "^https://example.com/(\\w+)/"
+ #:program '(open-section %1))  ; Capture path component
+```
+
 ### #:program and other methods
 
-See [Arbitrary options and different opening modes](#arbitrary-options-and-different-opening-modes)
+The primary command to execute when the pattern matches. Can be:
+- String (`"sxiv %f"`)
+- List of arguments (`'(sxiv %f)`)
+- Scheme procedure
+- Reference to another binding (`'nomacs`)
+
+Additional methods can be defined as arbitrary keywords (e.g., `#:gallery`) for alternative opening modes. These are invoked with `--method=METHOD`.
+
+Example:
+
+```scheme
+(bind
+ #:pattern "\\.md$"
+ #:program '(glow %f)          ; Default method
+ #:preview '(mdcat %f))        ; Custom preview mode
+```
 
 ### #:name
 
-``` scheme
-'name
-'name.method
+Assigns a unique identifier to a binding for cross-referencing. Named bindings can be invoked using:
+
+```scheme
+(bind #:pattern ... #:program 'named-binding)
+```
+
+or reference specific methods:
+
+```scheme
+(bind #:pattern ... #:program 'named-binding.method)
+```
+
+Example:
+
+```scheme
+(bind
+ #:name 'pdf-viewer
+ #:pattern "\\.pdf$"
+ #:program '(zathura %f)
+ #:edit '(xournalpp %f))
+
+(bind
+ #:pattern "\\.ps$"
+ #:program 'pdf-viewer
+ #:edit 'pdf-viewer.edit)
 ```
 
 ### #:test
+
+Optional precondition check that must succeed before running the main program. If the test fails, triggers `#:on-fail`:
+
+Example:
+
+```scheme
+(bind
+ #:name 'browser
+ #:pattern '("^https?://.*" "^.*\\.html?(#[\\w_-]+)?")
+ #:test '(pgrep qutebrowser)   ; Check if qutebrowser is running or not
+ #:program '(qutebrowser %f)   ; If it's running, open the url with it
+ #:on-fail '(firefox %f))      ; If not, fallback to Firefox
+```
+
 ### #:on-error
+
+Specifies fallback behavior when the main program fails. Special values:
+- `'continue`: Try subsequent bindings
+- Procedure or command list: Execute custom error handling
+
+Example:
+
+```scheme
+(bind
+ #:pattern "\\.mkv$"
+ #:program '(mpv --hwdec %f)
+ #:on-error '(vlc %f))         ; Fallback player
+```
+
 ### #:on-success
+
+Runs after successful execution of the main program. Useful for cleanup or notifications:
+
+Example:
+
+```scheme
+(bind
+ #:pattern "\\.enc$"
+ #:program "decrypt-file %f"
+ #:on-success "rm %f.enc")     ; Cleanup after success
+```
+
 ### #:continue-on-error
+
+Boolean flag (default: `#f`) that when true, continues to subsequent bindings after any error in the current binding.
+
+Example:
+
+```scheme
+(bind
+ #:pattern "\\.jpg$"
+ #:program "non-existing-program %f"  ; This binding will fail because the program does not exist.
+ #:continue-on-error #t)
+
+;; The next matching pattern will be used.
+
+(bind
+ #:pattern "image/*"
+ #:program "imv %f")
+```
+
 ### Arbitrary options and different opening modes
 
+Define custom methods for context-specific opening:
+
+```scheme
+(bind
+ #:pattern "image/.*"
+ #:program '(imv %f)
+ #:edit '(gimp %f))
+```
+
+and run this:
+
 ```sh
+jaro --method=edit photo.jpg
+```
+
+Also consider aliasing your common use-cases:
+
+``` sh
+alias open="jaro"
 alias edit="jaro --method=edit"
 alias view="jaro --method=view"
 alias gallery="jaro --method=gallery"
-# ...
 ```
 
+Now you can do the following instead:
+
+```sh
+edit photo.jpg
+view photo.jpg
+open photo.jpg
+```
 
 ### Environment detection, conditional runners
+
+Automatically select methods based on runtime environment using `define-conditional-runner`:
+
+Built-in conditionals: `emacs`, `tmux`, `term`, `vim`. Conditional runners are already defined for these environments but you can override them as well.
+
+```scheme
+(define-conditional-runner (kitty _)
+  (getenv "KITTY_PID"))
+
+;; Open images using `imv` program
+(bind
+ #:pattern "^image/.*"
+ #:program '(imv %f)
+ ;; If we are inside the Kitty terminal, simply use it's ability to
+ ;; show images instead of using an external program.
+ ;; #:kitty keyword is introduced by the define-conditional-runner
+ ;; call above
+ #:kitty '(kitty +kitten icat %f))
+```
+
 ### `select-one-of`
+
+Interactive selection menu for multiple options. Supported selectors:
+
+- `#:methods`: Current binding's own methods
+- `#:alternatives`: MIME type associations from system
+- `#:binaries`: Installed system commands/binaries
+- `#:bindings`: All named bindings
+- `'<binding-name>.<method-name>`: Direct reference to methods of other bindings.
+
+Example offering extraction options for archives:
+
+```scheme
+;; For select-one-of to work, you need to set the dynamic-menu-program
+;; Here we use choose[1] for macOS, rofi[2] for GNU/Linux.
+;;
+;; [1]: https://github.com/chipsenkbeil/choose
+;; [2]: https://github.com/davatorium/rofi
+(set!
+ dynamic-menu-program
+ (oscase
+  #:darwin "choose"
+  #:gnu/linux "rofi -dmenu"))
+
+(bind
+ #:pattern "\\.tar\\..*"
+ ;; Following shows a menu consisting of following items:
+ ;; - view
+ ;; - extract
+ ;; - ...all other programs that can open a tar files in your system
+ #:program (select-one-of #:methods #:alternatives)
+ ;; Runs when "view" is selected
+ #:view '(tar tvf %f)
+ ;; Runs when "extract" is selected
+ #:extract '(tar xvf %f))
+```
+
 ### Other user level functions
+
+- `(open-with 'binding-name)`: Reference other bindings
+- `(program ...)`: Scheme procedure wrapper with access to:
+  - `$input`: Original URI
+  - `$mimetype`: Detected type
+  - `$matches`: Regex capture groups
+  - `$1`-`$5`: Individual capture groups
+  - `(run (...))`: Program runner. It takes a parameter like what you supply to `#:program` and runs it.
+
+```scheme
+;; open-with
+(bind
+ #:pattern "\\.txt$"
+ #:program (open-with 'editor))     ; Delegate to 'editor binding
+
+(bind
+ #:name 'editor
+ #:pattern "^text/"
+ #:term '(vim %f))
+
+;; program
+(bind
+ #:pattern "https://github.com/([^/]+)/([^/]+)/?"
+ #:program (program
+            (if (string-suffix? ".git" $input)
+                (run (git clone %f))      ; Clone the repo if the URL ends with .git
+                (run (xdg-open %f)))))    ; Open it otherwise
+```
+
 ### Running elisp
+
+Execute Emacs Lisp code directly through `emacsclient`, using the `elisp` form:
+
+```scheme
+(bind
+ #:pattern "\\.org$"
+ #:program (elisp (find-file "%F")))
+```
+
+Supports all URI formatting placeholders (`%f`, `%F`, `%U`).
+
 ## Contributing
 
 Contributions are welcome! Please make sure to include tests with any major changes.
