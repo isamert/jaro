@@ -347,7 +347,7 @@
  (bind
   #:pattern "program-test (\\w+) (\\w+) (\\w+)"
   #:program (program
-             (format #f "~a ~a ~a" $1 $2 $3)))
+             (format #f "~a ~a ~a" %1 %2 %3)))
 
  (test-equal (jaro-run "program-test happy also happy") "happy also happy"))
 

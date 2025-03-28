@@ -209,12 +209,12 @@ Here is a commented configuration that illustrates advanced features of `jaro`:
 
  ;; Here, instead of directly running an external command we use the
  ;; "program" syntax. It simply let's us run arbitrary Guile scheme
- ;; code. Inside "program", the variables $1 $2 $3... etc are bound to
+ ;; code. Inside "program", the variables %1 %2 %3... etc are bound to
  ;; the capture groups from the #:pattern and the "run" let's you run
  ;; external programs using the syntax that you are familiar from the
  ;; earlier bindings.
  #:run (program
-         (match $1
+         (match %1
            ["jar" (run (java -jar %f))]
            ["apk" (run (notify-send "Can't run APK files. Install an Android Emulator?"))])))
 
@@ -453,7 +453,7 @@ Example offering extraction options for archives:
   - `$input`: Original URI
   - `$mimetype`: Detected type
   - `$matches`: Regex capture groups
-  - `$1`-`$5`: Individual capture groups
+  - `%1`-`%5`: Individual capture groups
   - `(run (...))`: Program runner. It takes a parameter like what you supply to `#:program` and runs it.
 
 ```scheme

@@ -647,19 +647,19 @@ Return #f if PROPERTY does not exist."
                      (mimetype (datum->syntax x '$mimetype))
                      (matches (datum->syntax x '$matches))
                      (binding (datum->syntax x '$binding))
-                     ($0 (datum->syntax x '$0))
-                     ($1 (datum->syntax x '$1))
-                     ($2 (datum->syntax x '$2))
-                     ($3 (datum->syntax x '$3))
-                     ($4 (datum->syntax x '$4))
-                     ($5 (datum->syntax x '$5)))
+                     (%0 (datum->syntax x '%0))
+                     (%1 (datum->syntax x '%1))
+                     (%2 (datum->syntax x '%2))
+                     (%3 (datum->syntax x '%3))
+                     (%4 (datum->syntax x '%4))
+                     (%5 (datum->syntax x '%5)))
          #'(λ (input mimetype matches binding)
-             (let ([$0 (assoc-ref matches "%0")]
-                   [$1 (assoc-ref matches "%1")]
-                   [$2 (assoc-ref matches "%2")]
-                   [$3 (assoc-ref matches "%3")]
-                   [$4 (assoc-ref matches "%4")]
-                   [$5 (assoc-ref matches "%5")])
+             (let ([%0 (assoc-ref matches "%0")]
+                   [%1 (assoc-ref matches "%1")]
+                   [%2 (assoc-ref matches "%2")]
+                   [%3 (assoc-ref matches "%3")]
+                   [%4 (assoc-ref matches "%4")]
+                   [%5 (assoc-ref matches "%5")])
                body ...)))))))
 
 (define-syntax elisp
