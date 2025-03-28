@@ -29,18 +29,34 @@ jaro [OPTIONS] <URI>
 
 - `-t`, `--mime-type`: Print the MIME type of the URI.
 - `-c`, `--cold-run`: Simulate the actions without executing them.
-- `-f`, `--binding-file FILE`: Use a specific binding configuration file (default: `~/.config/associations`).
-- `-m`, `--method METHOD`: Use a specific method to run the application.
+- `-f`, `--binding-file=FILE`: Use a specific binding configuration file (default: `~/.config/associations`).
+- `-m`, `--method=METHOD`: Use a specific method to run the application.
 - `-N`, `--no-stdin`: Do not read URI from standard input. This is helpful if you want to use jaro in a pipeline but you don't care about the results of the earlier steps.
 - `-h`, `--help`: Display help information.
 
 ## Installation
 
-To use _jaro_, ensure you have Guile (>= `1.8`) installed on your system. Place the `jaro` script in a directory that is in your system's PATH.
+To use _jaro_, ensure you have [Guile](https://www.gnu.org/software/guile/) (>= `1.8`) installed on your system. Place the `jaro` script in a directory that is in your system's `PATH`.
 
-For enhanced mimetype detection, install `Perl MimeInfo`, otherwise jaro will fallback to standard `file` utility for mimetype detection, which is far more inferior. To install it:
+``` sh
+# Fedora
+sudo dnf install guile
 
-``` shell
+# Debian/Ubuntu etc.
+sudo apt-get install guile-3.0
+
+# Arch
+sudo pacman -S guile
+```
+
+```sh
+curl -L -o /usr/local/bin/jaro https://raw.githubusercontent.com/isamert/jaro/refs/heads/master/jaro
+chmod +x /usr/local/bin/jaro
+```
+
+For enhanced mimetype detection, install `Perl MimeInfo`, otherwise _jaro_ will fallback to standard `file` utility for mimetype detection, which is far more inferior. To install it:
+
+```shell
 # Fedora
 sudo dnf install perl-File-MimeInfo
 
@@ -197,7 +213,7 @@ Here is a commented configuration that illustrates advanced features of `jaro`:
  #:unpack '(atool --extract %f)
  ;; Let user select a directory with `zenity` to extract the archive
  ;; into, using atool again
- #:unpack-to-directory "atool --extract-to=$(zenity  --file-selection --title='Choose a directory' --directory) %f"
+ #:unpack-to-directory "atool --extract-to=$(zenity --file-selection --title='Choose a directory' --directory) %f"
  ;; Open the archive using `file-roller`.
  #:view '(file-roller %f))
 
